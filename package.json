@@ -1,0 +1,33 @@
+{
+  "name": "dashier",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Dashier — a single-file, LLM-editable dashboard",
+  "homepage": "https://mvit.github.io/dashier/",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mvit/dashier.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node test-unit.mjs && node test-verify.cjs",
+    "e2e": "node test-e2e.cjs",
+    "unit": "node test-unit.mjs",
+    "upgrade": "node upgrade.mjs"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.15.0",
+    "terser": "^5.51.2",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.1.0",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

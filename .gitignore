@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+# macOS resource forks (AppleDouble), left by copying through a non-Mac drive
+._*
+# local Claude Code state
+.claude/
+# large local test data
+customers-*.csv
+*.dashier.html
+# local example reports
+/examples/
+# the sample report the site links to
+!site/examples/*.dashier.html

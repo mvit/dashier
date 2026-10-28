@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashier · Interactive reports in one HTML file</title>
+<meta name="description" content="Give your LLM agent data and the Dashier skill. Build an interactive report, refine it in your browser, and share it as one HTML file.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10.5 13.5V4.5a9 9 0 1 0 9 9z' fill='%235b8def'/%3E%3Cpath d='M13 11V2a9 9 0 0 1 9 9z' fill='%23f7a600'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --navy: #0e1628;
+    --cream: #f6f3ee;
+    --paper: #fffdf9;
+    --ink: #121a2b;
+    --ink-2: #3a4459;
+    --muted: #6b7489;
+    --line: #e6e1d8;
+    --blue: #5b8def;
+    --amber: #f7a600;
+    --amber-soft: #ffd27a;
+    --soft: #c1c9d8;
+    --display: "Iowan Old Style", "Charter", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --wrap: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; font: 16px/1.6 var(--sans); color: var(--ink); background: var(--cream); -webkit-font-smoothing: antialiased; }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: inherit; }
+  a:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 28px; }
+  .eyebrow { font: 600 12px/1 var(--sans); letter-spacing: 0.16em; text-transform: uppercase; color: #c47f00; }
+  .dark { background: var(--navy); color: #fff; }
+  .dark .eyebrow { color: var(--amber); }
+  h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+  h1 { font-size: clamp(44px, 6.4vw, 78px); line-height: 1.02; }
+  h2 { font-size: clamp(34px, 4.6vw, 56px); line-height: 1.04; }
+  h3 { font-size: 19px; line-height: 1.25; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  .lead { font-size: 18.5px; line-height: 1.6; color: var(--ink-2); max-width: 600px; }
+  .dark .lead { color: rgba(255, 255, 255, 0.74); }
+  .skip { position: absolute; top: -80px; left: 16px; z-index: 100; background: #fff; color: var(--ink); padding: 12px; }
+  .skip:focus { top: 12px; }
+
+  /* buttons */
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 19px; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none; border: 1px solid transparent; white-space: nowrap; transition: background 0.15s, border-color 0.15s; }
+  .btn-primary { background: var(--amber); color: #1b1300; }
+  .btn-primary:hover { background: var(--amber-soft); }
+  .btn-ghost { color: #fff; border-color: rgba(255, 255, 255, 0.24); }
+  .btn-ghost:hover { border-color: rgba(255, 255, 255, 0.55); }
+
+  .brand { display: inline-flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; font: 700 19px/1 var(--sans); letter-spacing: -0.02em; }
+
+  /* hero: words on the left, the sample report on the right */
+  .hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; padding-top: 80px; padding-bottom: 84px; }
+  .hero h1 { font-size: clamp(40px, 5.2vw, 66px); margin-top: 18px; }
+  .hero h1 span { color: var(--amber); }
+  .hero .lead { margin: 24px 0 28px; }
+  .trust { margin-top: 20px; color: #e1e6ef; font-size: 14px; }
+  .hero-visual { margin: 0; }
+  .shot { display: block; border-radius: 10px; overflow: hidden; background: #fff; border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(18, 26, 43, 0.1); }
+  .dark .shot { border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35); }
+
+  /* sections */
+  section { padding: 80px 0; }
+  section[id] { scroll-margin-top: 24px; }
+  .paper { background: var(--paper); }
+  .section-heading { max-width: 720px; }
+  .section-heading h2 { margin: 14px 0 20px; }
+
+  /* the agent workflow: three steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 32px; }
+  .step { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 26px; }
+  .step b { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--amber); color: #1b1300; font: 700 13px var(--sans); }
+  .step h3 { margin: 14px 0 6px; }
+  .step p { color: var(--ink-2); font-size: 16px; }
+  .step p + p { margin-top: 14px; }
+  .inline-prompt { margin: 18px 0; padding-left: 14px; border-left: 2px solid var(--amber); color: var(--ink-2); font-size: 15px; line-height: 1.6; }
+  .workflow-download { display: inline-block; font-size: 15px; font-weight: 650; text-underline-offset: 4px; }
+  .step .workflow-note { margin-top: 12px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+  /* the sample report */
+  .example-layout { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 44px; align-items: center; }
+  .example-layout h2 { margin: 14px 0 20px; }
+  .example-layout .lead { font-size: 17px; }
+  .example-layout .lead + .lead { margin-top: 16px; }
+  .example-layout .btns { margin-top: 26px; }
+  .meta-line { margin-top: 18px; font-size: 14px; color: var(--muted); }
+
+  footer { color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center; padding-top: 26px; padding-bottom: 26px; }
+  footer .brand { font-size: 16px; color: var(--ink); }
+  footer a { color: var(--ink-2); }
+
+  @media (max-width: 960px) {
+    .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  }
+  @media (max-width: 760px) {
+    .wrap { padding-left: 22px; padding-right: 22px; }
+    .hero .wrap { padding-top: 48px; padding-bottom: 44px; }
+    .example-layout, .steps { grid-template-columns: 1fr; }
+    .example-layout { gap: 28px; }
+    section { padding: 56px 0; }
+    .steps { gap: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn { transition: none; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hero dark" id="top">
+  <div class="wrap">
+    <div>
+      <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5V4.5a9 9 0 1 0 9 9z" fill="#5b8def"/><path d="M13 11V2a9 9 0 0 1 9 9z" fill="#f7a600"/></svg> dashier</div>
+      <div class="eyebrow" style="margin-top:36px">Built with your agent. Shared as one file.</div>
+      <h1>Make your next report <span>a file.</span></h1>
+      <p class="lead">The dashboard built for you and your LLM. Turn data into beautiful, interactive reports without a steep learning curve or starting from scratch. Refine in your browser. All in one small HTML file.</p>
+      <div class="btns">
+        <a class="btn btn-primary" href="dashier.html">Open Dashier</a>
+        <a class="btn btn-ghost" href="dashier-report-skill.zip" download>Get the skill</a>
+      </div>
+      <p class="trust">Free. MIT licensed. No account needed.</p>
+    </div>
+    <figure class="hero-visual">
+      <a class="shot" href="dashier.html" aria-label="Open Dashier on its tutorial"><img src="img/editor-tutorial.webp" width="1515" height="843" fetchpriority="high" alt="The Dashier editor in dark mode on the tutorial's first page: a welcome note, three cards, a region slicer and a column chart of revenue by month and category, beside the report theme settings."></a>
+    </figure>
+  </div>
+</header>
+
+<main id="main">
+<section class="paper" id="build">
+  <div class="wrap">
+    <div class="section-heading">
+      <div class="eyebrow">Made to work with an LLM agent</div>
+      <h2>Ask your agent. Make it yours. Ship it.</h2>
+      <p class="lead">The skill gives your agent the report format, building instructions and a validator. You bring the data and the questions.</p>
+    </div>
+    <div class="steps">
+      <article class="step">
+        <b aria-hidden="true">1</b>
+        <h3>Give your agent the brief</h3>
+        <p>Share the Dashier skill and your data. Tell your agent what you want to understand.</p>
+        <blockquote class="inline-prompt">“Compare revenue with last year, break it down by store and add a year filter.”</blockquote>
+        <a class="workflow-download" href="dashier-report-skill.zip" download>Get the skill <span aria-hidden="true">↓</span></a>
+        <p class="workflow-note">A 33 KB zip file. Your agent sees the data you share, under its provider’s data policy.</p>
+      </article>
+      <article class="step">
+        <b aria-hidden="true">2</b>
+        <h3>Review and refine</h3>
+        <p>Your agent creates the model, measures and charts, then validates the report’s structure. Check the numbers against your source.</p>
+        <p>Ask for another view, or open the same file in Dashier and edit it yourself.</p>
+      </article>
+      <article class="step">
+        <b aria-hidden="true">3</b>
+        <h3>Share the HTML file</h3>
+        <p>Your charts, tables, filters and compressed data travel together. Save the file and send it.</p>
+        <p>Anyone can open it in a browser, explore the report and use the editor. Dashier and the report make no network requests.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="examples">
+  <div class="wrap example-layout">
+    <div>
+      <div class="eyebrow">Try the finished result</div>
+      <h2>Who's got the beans?</h2>
+      <p class="lead">Explore Brightside Coffee, a sample business with twelve stores. Compare sales with targets, then look at revenue alongside customer ratings.</p>
+      <p class="lead">Pick a year, switch pages and hover a chart. Open the editor to see how the report was built.</p>
+      <div class="btns"><a class="btn btn-primary" href="examples/brightside.dashier.html#preview">Explore the coffee report <span aria-hidden="true">↗</span></a></div>
+      <p class="meta-line">6 tables · 14 measures · 4 pages · 207 KB</p>
+    </div>
+    <a class="shot" href="examples/brightside.dashier.html#preview" aria-label="Open the Brightside Coffee stores report"><img src="img/sample-stores.webp" width="1440" height="1012" loading="lazy" alt="Store performance report with sales against target, customer ratings and a table comparing every store."></a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Back to top"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5V4.5a9 9 0 1 0 9 9z" fill="#5b8def"/><path d="M13 11V2a9 9 0 0 1 9 9z" fill="#f7a600"/></svg> dashier</a>
+    <span>Interactive reports in one HTML file. MIT licensed. <a href="https://github.com/mvit/dashier">Source on GitHub</a>.</span>
+    <span>Charts adapted from <a href="https://github.com/obsidianmd/pele">Pele</a> (MIT, © kepano).</span>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="generator" content="dashier">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10.5 13.5V4.5a9 9 0 1 0 9 9z' fill='%235b8def'/><path d='M13 11V2a9 9 0 0 1 9 9z' fill='%23f7a600'/></svg>">
+  <title>Dashier tutorial</title>
+
+  <!-- Dashier (MIT). Bundled: Solid.js (MIT, © Ryan Carniato); charts ported from Pele (MIT, © kepano). -->
+
+  <!-- ═══ EDITING GUIDE (for LLMs and humans) ═══
+  The dashboard is the JSON in #dashier-doc below; the app renders it on load. Keep it valid JSON and write every "<" in
+  it as \u003c. #preview in the URL hides the editor, #<page id> opens a page, #fit fits the page to the window (#preview,fit). Leave the app code (base85(gzip(JS))) alone:
+  this guide describes everything a document needs, so decoding it never helps.
+
+  doc      { format:"dashier", version:1, title, theme?, canvas?:{width, height} (fixed page size in px, default 1440×810;
+    viewers zoom and pan, never reflow; it grows taller to fit), sources:{<id>:Source}, pages:[Page],
+    filters?:[Filter] (every page), relationships?:[Relationship], measures?:[Measure] }
+  Source   { format:"csv"|"json", encoding:"gzip+base64", structure:[{name, type, sortBy?}], payload }
+    type: string|float|int|uint|datetime|boolean (datetime: ISO "2024-01-03[T14:05]", also 1/3/2024, "Jan 3, 2024").
+    sortBy: another column whose values order this one's (month names by month number) on axes, legends, matrices,
+    slicers. payload = base64(gzip(CSV with header | JSON array of rows)); in Python: base64.b64encode(gzip.compress(
+    csv_bytes)).decode(), back with gzip.decompress(base64.b64decode(payload)).
+  Relationship { from:{table, field}, to:{table, field}, cardinality?, crossFilter?:"both" }: from = a fact (many side),
+    to = a dimension (one side; a repeated key matches its first row). cardinality: "many-to-one" (default) |
+    "one-to-one" (both are lookups; filters flow both ways) | "many-to-many" (no lookups: a row joins every match). Keys match by value, text ignoring case. Filters flow
+    to → from and on through further relationships ("both": also back; a filter on the linked field crosses either way).
+    Visuals use any connected table's fields as "table.field" (a row with no match shows them blank), and its measures.
+  Page     { id, title, elements:[Element], filters?:[Filter] }
+  Element  { id, type, x 0-11, y, w 1-12, h (12-column grid, rows), title?, sourceId? (its table, usually a fact; its own
+    fields are plain names), filters?:[Filter] }
+    chart    chartType:"bar"|"hbar"|"line"|"area"|"combo"|"scatter"|"pie"|"donut"|"radar"|"treemap"|"sankey"|"gauge",
+      mapping:{x, y, group?, line?, detail?}, summary?:Value (y; lineSummary?:Value the combo's line).
+      bar/hbar/line/area: x category, y value, group series · pie/donut: x slice · radar: x axis, group series ·
+      treemap: x leaf, group parent · sankey: x source, group target, y flow · gauge: y · combo: y columns, group
+      series, line on one axis · scatter: x, y numbers or measures, group color, detail
+      one point per value (x by xSummary?, y by summary). dateParts?:{x?, group?, detail?: DatePart} (oldest first).
+      options:{showLegend, legendPosition?:"bottom"|"top"|"right"|"left", showValues, yAxisLabel, xAxisLabel, min, max
+      (radar: center and rim), format?:Format, units?:Units (axis and labels), sort?:"value-desc"|"value-asc"|"label",
+      topN?, stack?:"stacked"|"percent" (combo: stacked; lines: percent), valueAxis?:false, categoryAxis?:false,
+      gridlines?:false, colors?:{<series, slice or category name>: color}, varyColors? (one series of bars),
+      barWidth? (0.2-1, default 0.7), barRadius? (px), lineWidth? (px), markers?:true|false,
+      refLines?:[{value | stat:"average"|"median"|"min"|"max" (of the first series), label?, color?}],
+      donutHole? (0.2-0.85)}
+    card     aggregation:{method:Aggregate, field}, format?, units?, subtitle? (static), staticValue?, compare?:Compare,
+      callout?:{size? (px), color?, align?:"left"}
+    table    columns?:[{field, label, align?, format?:Format|"date", units?, aggregate?, showAs?:"percent-of-total",
+      datePart?, cond?:"scale"|"bars"}] (default all; with any column aggregated, one row per combination of the
+      others), totals?:false, grid?:Grid
+  Grid     { density?:"compact"|"roomy", banded?:true, lines?:"both"|"none", textSize? (px) } (tables and matrices)
+    matrix   rows?:[{field, datePart?}] (hierarchy, outer first), columns?:[{field, datePart?}], values?:[{field, label?,
+      format?, units?, cond?} + Value], subtotals?:false, totals?:false|"row"|"column" (keep only that one), grid?:Grid
+    slicer   field (of sourceId), style?:"list"|"dropdown"|"tiles"|"range", single?, datePart?, selection?:{values?|min?,
+      max?|from?, to?}. The page's other visuals follow the pick. Default style: range for numbers, else list.
+    markdown content (Markdown + Mustache templates over the filtered data), textSize? (px), align?, bindings?:{<var>:{table, field?, aggregate?,
+      format?, units?, compare?}}: with aggregate one value in format (with compare, as a card's: "+6.4%"); else a field's
+      values, or without field the table's rows.
+      {{ v }} · {{#list}}…{{/list}} repeats (or shows when set; inside {{field}} reads the row, {{.}} the item) ·
+      {{^v}}…{{/v}} when empty ("—", a summary of no rows, is empty; a count is 0) · {{! comment }} · {{& v}} writes
+      the value as Markdown (values are plain text otherwise). Unbound names: a table's rows (first 1000), title,
+      page. Filters, chained: upper lower title truncate:n round:n format:"percent" date:"MMM d, yyyy" (yyyy yy MMMM
+      MMM MM M dddd ddd dd d) default:"n/a" join:", " first first:n last size sort sort:"field" reverse, e.g.
+      {{#sales | sort: "revenue" | reverse | first: 3}}- {{region}}{{/sales}}
+  Measure  { name (unique in the report), table, format?, units? } and a summary { aggregate:Aggregate, field (not for count),
+    where?: {field, values:["…"], table?} or a list of them (all must hold; table: a connected one) }, or a
+    calculation { op:"+"|"-"|"*"|"/"|"pct-diff" ((a − b)/|b|), a:Operand, b:Operand }; Operand {measure, table?} |
+    {field} (its sum) | {value}. Any connected visual uses it as "[name]" where a value goes; worked out per cell.
+  Aggregate sum|avg|min|max|median|stdev|var|count (rows)|distinct|mode|first|last (non-blank). Single values (cards,
+    bindings, table and matrix values) also take min/max/mode/first/last of text and dates.
+  Value    { aggregate?:Aggregate (default sum), showAs?:"percent-of-total"|"running-total" (along the axis, matrix
+    columns, else rows), compare?:Compare (per category or cell: a date axis or header moves too) }
+  Compare  { shift?:"period"|"year" (the date filters, slicers' too, moved back), filters?:[Filter] (in place of
+    those on the same fields), field? (another "[measure]"), show?:"change" (%, default)|"difference"|"value",
+    label? (default "vs 2025 Q3"), invert? (lower is better) }
+  Units    "auto"|"thousands"|"millions"|"billions": divided and suffixed, 2 decimals ($416.16B; integer: 1,094M)
+  Format   Values (cards, bindings, table/matrix cells, gauge center) use the value's format and units, else its
+    measure's (pct-diff measures: percent). None: a card uses "number"; a binding writes the raw number (for the
+    round/format filters); table cells up to 3 decimals, matrix cells up to 2, in the viewer's locale.
+    "number": under 1,000 as is, up to 2 decimals (999, 7.46, -182.50, 0.004); from 1,000 compact, 1 decimal (1.2K, 1.0M)
+    "integer": rounded, viewer's locale (1,235; 0.336 → 0) · "percent": fraction ×100, 1 decimal (0.336 → 33.6%)
+    "currency": US$, whole dollars from $100 ($1,235, -$183), cents below ($5.86, $5 when whole, $0.34)
+    Units: ÷ and suffix, 2 decimals (integer: whole): $416.16B, 1,094M; auto = largest unit reached; percent ignores.
+    Table "date"/"string": values as written. Charts: options.format, else the measure's format (not its units);
+    axes compact ($50B), data labels 3 digits under 1,000 ($7.46, $225) else 1 decimal ($1.1B), options.units fixes
+    one unit; tooltips exact ($416,161,000,000). Comparisons: change +6.4%, difference in the value's format
+    (+$25.13B, +1.6%, +0.07), value unsigned; nothing to compare: "—". Other currencies: "number"/"integer" + title.
+  DatePart "year"|"quarter"|"month"|"day"
+  Filter   { field, table, values?:["…"] | min?, max? | from?, to? (ISO, inclusive) | last:{n, unit:"day"|"week"|"month"|
+    "year"} | values + datePart ("2024 Q1") }. Reaches other tables through relationships; empty values = all.
+  Theme    report only: { mode:"light"|"dark"|"auto", background, surface (tiles), text, muted, border, accent,
+    palette:[8 colors], font, radius }
+  -->
+
+  <script type="application/dashier+json" id="dashier-doc">
+{
+ "format": "dashier",
+ "version": 1,
+ "title": "Dashier tutorial",
+ "theme": {"mode": "light"},
+ "sources": {
+  "sales": {"format": "csv", "encoding": "gzip+base64", "structure": [{"name": "date", "type": "datetime"}, {"name": "region", "type": "string"}, {"name": "category", "type": "string"}, {"name": "revenue", "type": "float"}, {"name": "units", "type": "uint"}], "payload": "H4sIAAAAAAAC/22YzW4dNwyF93mWKSDxRxQfoEBX3WTRtZHcpt74Atd2ir59z9gZUTMi4IUNf9AZ8ZAUpe9Pb7ftcfvxfH/ZvuH3H/fHf/j75+3l/ba9vzy/vX6hQvpbqfjZ/rw/3v7Z/nh6fP/36XHbqqvSxr4iX+9/v30gXDvVjaQlzO3x8/nb7XWr2qlstc/I1/v7SUlEHYutyFAiEmtbNUmYQ8m18VZPq/z+9Po26Rg7dPpChIxS8414XST2U9loqzwTf91OMg6dTfpCTHErrSBuviJDhqtgw/qLoMQgqmSySYKEkDAM4sIJE0qNDR7MyNUg5qpYZkUiclU/bPaEGUrFEN1KM3JxyPddn7d0cchqZ6RDXZEhQ43psqGzQ0TFbdO6ECHTTeAQ+4pE3Ky3kOHMIfbaN7UVCYeKFgi1kjBDSbxZlBBnDrWG8HNbkdhSUVOskjGjhMj75jNw9ocKSj5Sm7MKEldwbUWm1NYptTnzh4Q3lYWYwoamgfjaikQaeK0hI5k/IlXCH8n8QaoR/OGECX/Y9+Y0I1d/VLqGP5K2uL6nrfeEiQpSs+hxklRQl4IKkoUInbbr4N8rMoWO+BK6i0OodIoKkqyCHOVBQisSiSDoTvUIimYOqaEhaIKEQ6hU7MdLwgylRjodQpo65B2Hg63I5JAWVJBzwsTxULpEj9OkhiqyO0KnWY9T25tPX5EIXS9TDWl2CnWkv7SFCBnn1pEOdUXmHifhUEtrqPQatdrSGioFQtYTZigZIyr1hFwdsoKsZF2R6RRqjlW8Jczoca41SqglBlHZm5wuxHw6oCGT9BWJnoAOFQa1rMkpRhotCxFxY/6Im6/IlNjwsB6E5QaxbkorEkIdbQPDQsaEEs6YaHKWHkJsHCVkmUGCqOF7PWGiybloOGRZk2vwcNSHpQ51NAWxFZmaHOIyHLLEITEMWONotsQh5b3Jua1IzL9FPBK7p2NC7z2aXE8dIkJ34oyZJu1SLkprk2sInKxIRI5pH2vGlnrqEO0DCc3IdVBQFKKsxHSCC+JCI/971uSKaozaPXEIoy1tY47uiUNUbJeRFYnMtv0YOjbsmUOYruCQrsh8DOFjqVPChFKfBzlPawhjQKS2pw4p2X49S5g4hhr3cMgzhzq+d4TOE4cEHiG510WmLmcYA+rpSxaHkHHDZU9riFFDXVYkZHrXEbdaEoeQtbhDNluRIYRhA8c3H9eYEzOU+udwNCMXhzAQIixH4GZkut8RBkLSjIlqpSnrPpGLQ8LwUHkhQsf3nOMjuWckNoTcvWzo4pDt4/j5W88OCYujaxyJMCOTTMeJ+Ktn1+w9gfG1ZTtu8DV7T5DqZW9PGXMoERnaNumMXB0qcHFMWLWmDhX2uD/U7D0BV1GVcCh5UCDbT7OjcdfkQQFdAWPAuIDXmjq0nyFlJi4OuSNVGi9EBE5rNXQNWZERt88dH3GjtIbIJoeyBwVpjeeMSx8UXG1KuexBgTDa8LhH1uxBAcB+8Rrpnz4oaK+TQ8mDAi7WpOOGVyl1aJ8liFckHNofFIhm4uwQF0MiNFuICFzZHxS4+IpMMvtM71/+B/xf09+3EwAA"},
+  "regions": {"format": "csv", "encoding": "gzip+base64", "structure": [{"name": "region", "type": "string"}, {"name": "manager", "type": "string"}, {"name": "target", "type": "float"}], "payload": "H4sIAAAAAAAC/yXJPQ7DIAxA4Z1TcAAPYUiqjlXULf1RGTp7cAAlYMmYnr8oeeP3hELiAhkLBhJQlEBqniwa4fZD+0alHZwbh57x3LovLVX74UzCcJmOcceq8KBk50gFrid+qaPHbF8brizghiPzB40ofVF0AAAA"}
+ },
+ "relationships": [
+  {"from": {"table": "sales", "field": "region"}, "to": {"table": "regions", "field": "region"}}
+ ],
+ "measures": [
+  {"name": "Revenue per unit", "table": "sales", "format": "currency", "op": "/", "a": {"field": "revenue"}, "b": {"field": "units"}},
+  {"name": "Software revenue", "table": "sales", "format": "currency", "aggregate": "sum", "field": "revenue", "where": {"field": "category", "values": ["Software"]}}
+ ],
+ "pages": [
+  {"id": "page_welcome", "title": "1 · Welcome", "elements": [
+   {"id": "welcome_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Welcome to Dashier\nThis report and its data are one HTML file. Save it with **Share ▸ Save** (Ctrl+S) and send it: it opens in any browser, with no server or sign-in.\n\n**Look around**\n- Pick a region in the slicer: every visual on the page follows.\n- Hover a column for its exact value.\n- Pinch or use the slider at the bottom right to zoom; drag the background to pan.\n- **Preview** (top right) shows the report the way recipients see it. Esc comes back.\n\n**Then work through the pages** (tabs at the bottom). Each one teaches a part of the editor on this same data. Change anything you like: Ctrl+Z undoes it."},
+   {"id": "welcome_revenue", "type": "card", "x": 4, "y": 0, "w": 2, "h": 2, "title": "Revenue", "sourceId": "sales", "aggregation": {"method": "sum", "field": "revenue"}, "format": "currency"},
+   {"id": "welcome_units", "type": "card", "x": 6, "y": 0, "w": 2, "h": 2, "title": "Units sold", "sourceId": "sales", "aggregation": {"method": "sum", "field": "units"}, "format": "integer"},
+   {"id": "welcome_per_unit", "type": "card", "x": 8, "y": 0, "w": 2, "h": 2, "title": "Revenue per unit", "sourceId": "sales", "aggregation": {"method": "sum", "field": "[Revenue per unit]"}, "subtitle": "a measure"},
+   {"id": "welcome_region", "type": "slicer", "x": 10, "y": 0, "w": 2, "h": 2, "title": "Region", "sourceId": "sales", "field": "region"},
+   {"id": "welcome_chart", "type": "chart", "x": 4, "y": 2, "w": 8, "h": 6, "title": "Revenue by month and category", "chartType": "bar", "sourceId": "sales", "mapping": {"x": "date", "y": "revenue", "group": "category"}, "dateParts": {"x": "month"}, "options": {"format": "currency"}}
+  ]},
+  {"id": "page_build", "title": "2 · Build a visual", "elements": [
+   {"id": "build_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Build a visual\n1. Click an empty spot on the page, then pick a visual in the **Visualizations** pane. With a visual selected, picking another type switches it.\n2. Drag fields from the **Data** pane into its slots: X-axis, Y-axis, Legend and so on.\n3. Open a field's menu in a slot (⌄) to choose Sum, Average or Count, show it as a % of the grand total, or group a date by year, quarter or month.\n4. The **Format** tab sets the title, number format, sort order, top N, legend and data labels.\n\nDrag a visual to move it and pull its edges to resize. Right-click it to duplicate or delete.\n\n**Your turn:** select the empty chart and drag **region** onto the X-axis and **revenue** onto the Y-axis."},
+   {"id": "build_yours", "type": "chart", "x": 4, "y": 0, "w": 4, "h": 4, "title": "Your turn: revenue by region", "chartType": "bar", "mapping": {}},
+   {"id": "build_pie", "type": "chart", "x": 8, "y": 0, "w": 4, "h": 4, "title": "Revenue share by category", "chartType": "pie", "sourceId": "sales", "mapping": {"x": "category", "y": "revenue"}, "options": {"showValues": true, "format": "currency"}},
+   {"id": "build_table", "type": "table", "x": 4, "y": 4, "w": 8, "h": 4, "title": "Revenue and units by region and category", "sourceId": "sales", "columns": [{"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "align": "right", "format": "currency", "aggregate": "sum", "cond": "bars"}, {"field": "units", "label": "Units", "align": "right", "format": "integer", "aggregate": "sum", "cond": "scale"}]}
+  ]},
+  {"id": "page_filter", "title": "3 · Filter and slice", "elements": [
+   {"id": "filter_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Filter and slice\n**Slicers** are filters that live on the page. The two at the top filter everything else here, and the pick is saved with the file. Their style (list, dropdown, tiles, range) is in the Format tab.\n\nThe **Filters** pane takes a field dragged onto *On this visual*, *On this page* or *On all pages*. A date filter can also keep only the last few days, weeks, months or years.\n\nThe software chart has a filter of its own: select it and look in the Filters pane.\n\n**Connected tables filter each other.** Managers and targets come from the *regions* table, linked to *sales* by region. To see the link, right-click *sales* in the Data pane ▸ **Edit data… ▸ Relationships**."},
+   {"id": "filter_category", "type": "slicer", "x": 4, "y": 0, "w": 4, "h": 1, "title": "Category", "sourceId": "sales", "field": "category", "style": "dropdown"},
+   {"id": "filter_quarter", "type": "slicer", "x": 8, "y": 0, "w": 4, "h": 1, "title": "Quarter", "sourceId": "sales", "field": "date", "datePart": "quarter", "style": "tiles"},
+   {"id": "filter_trend", "type": "chart", "x": 4, "y": 1, "w": 8, "h": 4, "title": "Revenue by month and region", "chartType": "line", "sourceId": "sales", "mapping": {"x": "date", "y": "revenue", "group": "region"}, "dateParts": {"x": "month"}, "options": {"format": "currency"}},
+   {"id": "filter_software", "type": "chart", "x": 4, "y": 5, "w": 4, "h": 3, "title": "Software only: revenue by manager", "chartType": "hbar", "sourceId": "sales", "mapping": {"x": "regions.manager", "y": "revenue"}, "filters": [{"field": "category", "values": ["Software"]}], "options": {"format": "currency", "sort": "value-desc"}},
+   {"id": "filter_targets", "type": "table", "x": 8, "y": 5, "w": 4, "h": 3, "title": "Targets (regions table)", "sourceId": "regions", "columns": [{"field": "region", "label": "Region"}, {"field": "manager", "label": "Manager"}, {"field": "target", "label": "Target", "align": "right", "format": "currency"}]}
+  ]},
+  {"id": "page_measures", "title": "4 · Measures and text", "elements": [
+   {"id": "measures_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Measures and text\nA **measure** is a named calculation you can drop into any visual. Right-click a table in the Data pane ▸ **New measure…** and choose either:\n- a summary, like Sum of revenue where category is Software, or\n- a calculation between two values: add, subtract, multiply, divide or % difference.\n\nThis file has two measures, *Revenue per unit* and *Software revenue*. Drag them like any other field. The card compares Q4 with Q3: its field's menu (⌄) ▸ **Compare with**.\n\n**Text boxes** mix writing with live numbers. Select the Highlights box: each name in double curly braces gets a slot under the text. Drop a field on the slot, then pick its summary and format from the field's menu. The list of managers repeats a line for each row of the *regions* table; the Build tab shows how it's written."},
+   {"id": "measures_highlights", "type": "markdown", "x": 4, "y": 0, "w": 5, "h": 3, "title": "Highlights", "content": "**{{ revenue }}** in revenue from **{{ units }}** units: **{{ per_unit }}** per unit. Software brought in **{{ software }}**.\n\n{{#regions}}\n- **{{ region }}**: {{ manager }}\n{{/regions}}", "bindings": {"revenue": {"table": "sales", "field": "revenue", "aggregate": "sum", "format": "currency"}, "units": {"table": "sales", "field": "units", "aggregate": "sum", "format": "integer"}, "per_unit": {"table": "sales", "field": "[Revenue per unit]"}, "software": {"table": "sales", "field": "[Software revenue]"}}},
+   {"id": "measures_card", "type": "card", "x": 9, "y": 0, "w": 3, "h": 3, "title": "Software revenue", "sourceId": "sales", "aggregation": {"method": "sum", "field": "[Software revenue]"}, "subtitle": "a measure: revenue where category is Software", "filters": [{"field": "date", "table": "sales", "datePart": "quarter", "values": ["2025 Q4"]}], "compare": {"shift": "period"}},
+   {"id": "measures_combo", "type": "chart", "x": 4, "y": 3, "w": 8, "h": 5, "title": "All revenue (columns) and software revenue (line)", "chartType": "combo", "sourceId": "sales", "mapping": {"x": "date", "y": "revenue", "line": "[Software revenue]"}, "dateParts": {"x": "month"}, "options": {"format": "currency"}}
+  ]},
+  {"id": "page_data", "title": "5 · Your data", "elements": [
+   {"id": "data_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Your own data\n**Add a table:** **+ Get data** at the bottom of the Data pane. Drop a CSV or JSON file or paste text, check the column types and name the table.\n\n**Tidy it:** right-click a table ▸ **Edit data…** to change column types, rename columns, connect it to other tables and see which visuals use it.\n\n**Update it:** **Replace data…** loads a newer CSV into the same table and keeps every visual. It warns you if a column the report uses has gone missing.\n\n**Make it yours:** click an empty part of the page for the report theme and page size. Rename, duplicate or delete pages by right-clicking their tabs.\n\n**Share it:** **Share ▸ Save** writes everything into this file. **Print…** lays the pages out for paper or PDF.\n\nWhen you're done, delete these pages and the *sales* and *regions* tables, and start your own report."},
+   {"id": "data_table", "type": "table", "x": 4, "y": 0, "w": 8, "h": 8, "title": "The sales table: click a header to sort", "sourceId": "sales", "columns": [{"field": "date", "label": "Month"}, {"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "align": "right", "format": "currency"}, {"field": "units", "label": "Units", "align": "right", "format": "integer"}]}
+  ]}
+ ]
+}
+  </script>
+
+  <style>
+    #d-splash {
+      position: fixed;
+      inset: 0;
+      background: #0B0F17;
+      color: #F1F5F9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      z-index: 9999;
+    }
+    #d-splash b { font-size: 19px; letter-spacing: -0.4px; }
+    #d-splash span { font-size: 13px; color: #94A3B8; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="d-splash"><b>dashier</b><span>Loading…</span></div>
+  <div id="app"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

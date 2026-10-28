@@ -1,0 +1,111 @@
+{
+  "format": "dashier",
+  "version": 1,
+  "title": "Operations & Analytics Hub",
+  "theme": { "mode": "light" },
+  "sources": {
+    "regional_metrics": {
+      "format": "csv",
+      "encoding": "gzip+base64",
+      "structure": [
+        { "name": "region", "type": "string" },
+        { "name": "quarter", "type": "string" },
+        { "name": "revenue", "type": "float" },
+        { "name": "active_users", "type": "uint" }
+      ],
+      "payload": "H4sIAAAAAAAACmWQsW7EIBBEe3/FfcAKzS4LhvKKdFGUfEGELJJQxL5g+74/4uTCOjrQm53dmZq/yzLT357qlivVfM/znilNW7nnz33NdR3elrr9XK6/uZYp0QcTizrAOBCrAM8CIVYrgAGIvesFltiHCBhxxO3xLFDi6BQwASTCwPCy1+WW2/IY9LBmOQFpfwuY0RFbPRFLLDEcM+48o8Qa/JFkDMBwXUu6vKepfJWpLQtNbwQUeyrEePTQfMV33BLbdqLRVgN3XIm9HFkErabXtJX5XLS27I1r7LGQPkp0IBd6bMn5w92PPVbyemQbI/APlwwpGAgCAAA="
+    },
+    "region_targets": {
+      "format": "csv",
+      "encoding": "gzip+base64",
+      "structure": [
+        { "name": "area", "type": "string" },
+        { "name": "target_revenue", "type": "float" }
+      ],
+      "payload": "H4sIAAAAAAAC/0ssSk3UKUksSk8tiS9KLUvNK03l8ssvKslQcMxNLcpMTtSxMAABLtfSovyCVB0zCM+xODNRISAxOTMtM1nH1BQs5pNYkpkH12YEEQQAspU+d2AAAAA="
+    }
+  },
+  "relationships": [
+    { "from": { "table": "regional_metrics", "field": "region" }, "to": { "table": "region_targets", "field": "area" }, "join": "left" }
+  ],
+  "pages": [
+    {
+      "id": "page_overview",
+      "title": "Quarterly Summary",
+      "elements": [
+        {
+          "id": "elem_kpi_rev", "type": "card", "x": 0, "y": 0, "w": 3, "h": 2,
+          "title": "Total Revenue", "sourceId": "regional_metrics",
+          "aggregation": { "method": "sum", "field": "revenue" }, "format": "currency"
+        },
+        {
+          "id": "elem_kpi_users", "type": "card", "x": 3, "y": 0, "w": 2, "h": 2,
+          "title": "Active Users (Peak)", "sourceId": "regional_metrics",
+          "aggregation": { "method": "max", "field": "active_users" }, "format": "number", "subtitle": "Peak quarterly cohort"
+        },
+        {
+          "id": "elem_kpi_target", "type": "card", "x": 5, "y": 0, "w": 3, "h": 2,
+          "title": "Revenue Target", "sourceId": "region_targets",
+          "aggregation": { "method": "sum", "field": "target_revenue" }, "format": "currency"
+        },
+        {
+          "id": "elem_notes", "type": "markdown", "x": 8, "y": 0, "w": 4, "h": 2,
+          "title": "Executive Notes",
+          "content": "* **Revenue:** {{ revenue }} across {{ region_quarters }} region-quarters (average {{ avg_revenue }}).\n* **Peak users:** {{ peak_users }}.",
+          "bindings": {
+            "revenue": { "table": "regional_metrics", "field": "revenue", "aggregate": "sum", "format": "currency" },
+            "region_quarters": { "table": "regional_metrics", "aggregate": "count" },
+            "avg_revenue": { "table": "regional_metrics", "field": "revenue", "aggregate": "avg", "format": "currency" },
+            "peak_users": { "table": "regional_metrics", "field": "active_users", "aggregate": "max", "format": "integer" }
+          }
+        },
+        {
+          "id": "elem_chart_rev", "type": "chart", "x": 0, "y": 2, "w": 7, "h": 5,
+          "title": "Revenue by Region & Quarter", "chartType": "bar", "sourceId": "regional_metrics",
+          "mapping": { "x": "region", "y": "revenue", "group": "quarter" }
+        },
+        {
+          "id": "elem_chart_trend", "type": "chart", "x": 7, "y": 2, "w": 5, "h": 5,
+          "title": "Quarterly User Growth", "chartType": "line", "sourceId": "regional_metrics",
+          "mapping": { "x": "quarter", "y": "active_users", "group": "region" }
+        },
+        {
+          "id": "elem_table_raw", "type": "table", "x": 0, "y": 7, "w": 12, "h": 5,
+          "title": "Regional Performance Breakdown", "sourceId": "regional_metrics",
+          "columns": [
+            { "field": "region", "label": "Region", "align": "left" },
+            { "field": "quarter", "label": "Quarter", "align": "center" },
+            { "field": "revenue", "label": "Revenue", "align": "right", "format": "currency" },
+            { "field": "active_users", "label": "Active Users", "align": "right", "format": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_details",
+      "title": "Distribution Share",
+      "elements": [
+        {
+          "id": "elem_pie_rev", "type": "chart", "x": 0, "y": 0, "w": 4, "h": 5,
+          "title": "Revenue Share by Region", "chartType": "pie", "sourceId": "regional_metrics",
+          "mapping": { "x": "region", "y": "revenue" }, "options": { "showValues": true }
+        },
+        {
+          "id": "elem_radar_users", "type": "chart", "x": 4, "y": 0, "w": 4, "h": 5,
+          "title": "Users by Quarter", "chartType": "radar", "sourceId": "regional_metrics",
+          "mapping": { "x": "quarter", "y": "active_users", "group": "region" }
+        },
+        {
+          "id": "elem_tree_rev", "type": "chart", "x": 8, "y": 0, "w": 4, "h": 5,
+          "title": "Revenue Treemap", "chartType": "treemap", "sourceId": "regional_metrics",
+          "mapping": { "x": "quarter", "y": "revenue", "group": "region" }
+        },
+        {
+          "id": "elem_flow", "type": "chart", "x": 0, "y": 5, "w": 12, "h": 5,
+          "title": "Revenue flow: region to quarter", "chartType": "sankey", "sourceId": "regional_metrics",
+          "mapping": { "x": "region", "y": "revenue", "group": "quarter" }
+        }
+      ]
+    }
+  ]
+}

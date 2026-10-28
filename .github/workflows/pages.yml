@@ -1,0 +1,51 @@
+# Builds Dashier and publishes site/ to GitHub Pages: https://mvit.github.io/dashier/
+# (a project repo's Pages site is served under the owner's github.io domain at /<repo>/).
+# One-time setup: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; let an in-progress one finish
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Assemble the site (fresh editor and skill zip)
+        run: |
+          cp dist/dashier.html site/dashier.html
+          rm -f site/dashier-report-skill.zip
+          (cd skill && zip -rqX ../site/dashier-report-skill.zip dashier-report)
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
