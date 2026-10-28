@@ -14,7 +14,7 @@ MIT licensed. Free.
 |---|---|
 | `src/`, `index.html` | The app (Solid.js) and the page template, whose head carries the editing guide for people and LLMs |
 | `dist/dashier.html` | The built editor, opening on its tutorial: the one file you share |
-| `skill/dashier-report/` | The LLM skill: `SKILL.md` plus `build_report.py` (writes a document into a Dashier file) and `validate_dashier.py` (checks it) |
+| `skill/dashier-report/` | The LLM skill: `SKILL.md` plus `get_dashier.py` (downloads the current editor from the site), `build_report.py` (writes a document into a Dashier file) and `validate_dashier.py` (checks it) |
 | `site/` | The landing page, with the editor, the sample report and the skill as a zip. Every push to `main` rebuilds the editor and the zip into it and publishes it to https://mvit.github.io/dashier/ (`.github/workflows/pages.yml`) |
 | `tests/`, `test-*.cjs`, `test-unit.mjs` | Unit tests, checks on the built file and browser tests |
 
@@ -38,7 +38,7 @@ The report page has a fixed size (default 1440×810, set under **Page size** whe
 
 ## Build a report with an LLM agent
 
-Give your agent the skill (`skill/dashier-report`, or `site/dashier-report-skill.zip`), your data and any Dashier file to build from. It models the data as a star schema, writes measures with their formats, binds the numbers in the text to the data, builds the file and validates it. Each report lives in its own folder:
+Give your agent the skill (`skill/dashier-report`, or `site/dashier-report-skill.zip`) and your data. It downloads the current editor from https://mvit.github.io/dashier/ to build on (or give it a Dashier file to build from instead). It models the data as a star schema, writes measures with their formats, binds the numbers in the text to the data, builds the file and validates it. Each report lives in its own folder:
 
 ```
 sales-report/
@@ -53,7 +53,7 @@ sales-report/
 cd sales-report
 python3 extract.py source/      # your source files
 python3 build_doc.py
-python3 <skill>/scripts/build_report.py dashier.html doc.json sales-report.dashier.html
+python3 <skill>/scripts/build_report.py doc.json sales-report.dashier.html   # downloads the editor; or pass a Dashier file first
 python3 <skill>/scripts/validate_dashier.py sales-report.dashier.html
 ```
 

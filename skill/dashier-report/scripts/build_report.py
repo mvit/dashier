@@ -2,7 +2,8 @@
 """
 Writes a Dashier document into a copy of a Dashier template.
 
-    python3 build_report.py TEMPLATE.html DOC.json OUT.html
+    python3 build_report.py DOC.json OUT.html                  # template: the current editor, downloaded
+    python3 build_report.py TEMPLATE.html DOC.json OUT.html    # template: a Dashier file (path or URL)
 
 DOC.json is a normal Dashier document, except that a source may name a CSV file instead of carrying a payload:
 
@@ -14,6 +15,9 @@ in header order). Sources that already have a payload are kept as they are. Ever
 \\u003c, and nothing else in the template is touched. The template itself is never modified.
 """
 import base64, csv, gzip, io, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from get_dashier import fetch
 
 NUM = re.compile(r'^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$')
 DATE = re.compile(r'^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$')
@@ -42,7 +46,7 @@ def infer(values):
 
 
 def main(template, doc_path, out):
-    html = open(template, encoding='utf-8').read()
+    html = fetch(template)
     m = re.search(r'(<script type="application/dashier\+json" id="dashier-doc">)(.*?)(</script>)', html, re.S)
     if not m:
         sys.exit(f'{template}: no dashier-doc block (is this a Dashier file?)')
@@ -67,6 +71,10 @@ def main(template, doc_path, out):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
+    args = sys.argv[1:]
+    if len(args) == 2:
+        main(None, *args)
+    elif len(args) == 3:
+        main(*args)
+    else:
         sys.exit(__doc__)
-    main(*sys.argv[1:])

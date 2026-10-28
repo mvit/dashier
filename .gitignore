@@ -11,3 +11,5 @@ customers-*.csv
 /examples/
 # the sample report the site links to
 !site/examples/*.dashier.html
+# Python bytecode (the skill scripts import each other)
+__pycache__/

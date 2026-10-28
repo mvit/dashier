@@ -21,7 +21,8 @@ Scripts in `scripts/` (run them, don't retype them):
 
 | Script | Does |
 |---|---|
-| `build_report.py TEMPLATE.html DOC.json OUT.html` | writes DOC.json into a copy of the template; a source written as `{"file": "data/x.csv"}` is packed (gzip+base64) and its `structure` inferred |
+| `get_dashier.py [OUT.html]` | downloads the current Dashier editor (default `dashier.html`), the template a new report is built from |
+| `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (the current editor, downloaded, when none is given; a path or URL otherwise); a source written as `{"file": "data/x.csv"}` is packed (gzip+base64) and its `structure` inferred |
 | `validate_dashier.py OUT.html` | checks the model against its data, every field reference, filter and slicer values (a value that matches nothing empties a visual), text box templates and the grid; exit 0 = no FAIL |
 
 ## Rules that are never skipped
@@ -63,7 +64,7 @@ apple-10k/
 cd apple-10k
 python3 extract.py sheets/     # writes data/
 python3 build_doc.py           # writes doc.json
-python3 <skill>/scripts/build_report.py <template>.html doc.json apple-10k.dashier.html
+python3 <skill>/scripts/build_report.py doc.json apple-10k.dashier.html
 python3 <skill>/scripts/validate_dashier.py apple-10k.dashier.html
 ```
 
@@ -73,10 +74,14 @@ packs them.
 
 ### 1. Start from a template
 
-Use the Dashier .html the user provided (any Dashier report or the tutorial is a template: the app is the same,
-only the document differs). Never edit the user's original: build into a new file. Don't invent or rebuild the app.
-If there is no Dashier file, ask for one. Read the EDITING GUIDE comment in the template's head; where it and this
-file differ, this file is newer. **Never decode or read the packed app code** (the `dashier-js` block, ~250K
+A new report needs no Dashier file from the user. `python3 <skill>/scripts/get_dashier.py` downloads the current
+editor to `dashier.html` (from https://mvit.github.io/dashier/, or the copy in github.com/mvit/dashier), and
+`build_report.py` downloads it itself when it is given no template. Use a Dashier file the user provides instead
+when there is one: a report to change, or a build they want kept (any Dashier report or the tutorial is a template:
+the app is the same, only the document differs). Never edit the user's original: build into a new file. Don't
+invent or rebuild the app. If the download fails (no network), ask the user for a Dashier file. Read the EDITING
+GUIDE comment in the template's head (the downloaded `dashier.html` has it); where it and this file differ, this
+file is newer. **Never decode or read the packed app code** (the `dashier-js` block, ~250K
 characters): number formats, chart behavior, filters and templates are all described in the guide and here.
 
 **Take the app from the template, never its document.** `build_report.py` replaces the whole document, so don't
@@ -488,7 +493,7 @@ Name the fact tables once (`S, G = 'fact_category_sales', 'fact_segment'`), buil
 `(fact, key, dimension)` triples, and give each page's text strip and slicer a helper too. Then:
 
 ```bash
-python3 scripts/build_report.py template.html doc.json report.html
+python3 scripts/build_report.py doc.json report.html
 python3 scripts/validate_dashier.py report.html          # fix every FAIL; fix or justify every WARN
 ```
 
