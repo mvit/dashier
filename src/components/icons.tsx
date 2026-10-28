@@ -5,9 +5,9 @@ const icon = (d: string) => () => (
   </svg>
 );
 
-/** A curved arrow back. */
+/** A curved arrow back: Lucide's undo-2 (ISC, © 2026 Lucide Icons and Contributors), redrawn as one path. */
 export const UndoIcon = icon('M9 15L4 10l5-5M4 10h10.5a5.5 5.5 0 0 1 0 11H11');
-/** A curved arrow forward. */
+/** A curved arrow forward: Lucide's redo-2 (ISC, © 2026 Lucide Icons and Contributors), redrawn as one path. */
 export const RedoIcon = icon('M15 15l5-5-5-5M20 10H9.5a5.5 5.5 0 0 0 0 11H13');
 /** A funnel, crossed out: clears a filter's or slicer's pick. */
 export const ClearFilterIcon = icon('M3 4h15l-6 7v6l-3 2v-8L3 4zM16 15l5 5M21 15l-5 5');
