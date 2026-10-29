@@ -313,7 +313,7 @@ button { font: inherit; background: none; border: 0; cursor: pointer; }
 .d-about { max-width: 340px; padding: 28px; display: grid; justify-items: center; gap: 8px; text-align: center; }
 .d-about p { color: var(--muted); font-size: 13px; }
 .d-about a { color: var(--selection); }
-.d-about .btn-primary { margin-top: 8px; }
+.d-about > .btn-primary, .d-about .d-row { margin-top: 8px; }
 .d-password .d-input { width: 100%; font-size: 14px; padding: 8px 10px; }
 .d-drawer-btn { display: none; }
 .ed-logo { display: grid; padding: 3px; border-radius: 6px; }

@@ -1291,6 +1291,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       // Export JSON is the hand-over format: plain data even from an encrypted report, valid, and opened with no prompt
       dir = await saveDir(p3);
       await share(p3, 'Export JSON');
+      await p3.waitForSelector('.d-about');
+      check('Export JSON from an encrypted report first warns that the data comes out readable', (await p3.$eval('.d-about', (e) => e.textContent)).includes('anyone with the JSON can read the data'));
+      await p3.click('.d-about .btn-secondary');
+      await sleep(300);
+      check('…and Cancel exports nothing', !(await p3.$('.d-about')) && !fs.readdirSync(dir).length);
+      await share(p3, 'Export JSON');
+      await p3.waitForSelector('.d-about');
+      await p3.click('.d-about .btn-primary');
       const json = await download(dir, '.dashier.json');
       const exported = json && JSON.parse(fs.readFileSync(json, 'utf8'));
       check('Export JSON uses one-space indents too', !!json && fs.readFileSync(json, 'utf8').startsWith('{\n "format"'));

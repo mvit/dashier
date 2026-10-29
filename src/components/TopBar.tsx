@@ -4,7 +4,7 @@ import { store } from '../runtime/store';
 import { Logo, RedoIcon, UndoIcon } from './icons';
 import { PasswordDialog } from './PasswordDialog';
 
-export const TopBar: Component<{ onAbout: () => void }> = (props) => {
+export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }> = (props) => {
   const [notification, setNotification] = createSignal('');
   const [asking, setAsking] = createSignal(false);
 
@@ -98,7 +98,8 @@ export const TopBar: Component<{ onAbout: () => void }> = (props) => {
               { label: 'Encrypt with password…', onSelect: () => setAsking(true) },
               { label: 'Remove encryption', disabled: !store.encrypted(), onSelect: () => setPassword(null) },
               '-',
-              { label: 'Export JSON', onSelect: () => store.exportJSON() },
+              // from an encrypted report the JSON is readable: App warns first
+              { label: 'Export JSON', onSelect: () => (store.encrypted() ? props.onExportJSON() : store.exportJSON()) },
               { label: 'Open JSON…', onSelect: openJSON }
             ])
           }
