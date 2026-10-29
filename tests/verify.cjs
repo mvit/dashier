@@ -28,9 +28,9 @@ for (const [id, src] of Object.entries(doc.sources)) {
   check(`source "${id}" is gzip+base64`, src.encoding === 'gzip+base64');
   check(`source "${id}" has a structure manifest`, Array.isArray(src.structure) && src.structure.length > 0);
   const text = zlib.gunzipSync(Buffer.from(src.payload, 'base64')).toString('utf-8');
-  // names without quotes or commas here: a row CSV's header line, a column CSV's first field on each line
-  const lines = text.split('\n');
-  const header = src.format === 'csv' ? lines[0].split(',').map(s => s.trim()) : src.format === 'csv-columns' ? lines.map(l => l.split(',')[0].trim()) : Object.keys(JSON.parse(text)[0] || {});
+  check(`source "${id}" is stored as columns`, src.format === 'csv-columns');
+  // a line per column, its name first (the tutorial's names have no quotes or commas)
+  const header = text.trim().split('\n').map(l => l.split(',')[0].trim());
   const names = src.structure.map(c => c.name);
   check(`source "${id}" structure matches the payload columns`, JSON.stringify(header) === JSON.stringify(names), header.join(','));
   src.fields = new Set(names);

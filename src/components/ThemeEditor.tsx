@@ -66,7 +66,7 @@ export const ThemeEditor: Component = () => {
           {([key, name]) => (
             <label class="d-swatch">
               <input type="color" value={theme()[key]} onInput={(e) => store.setTheme({ [key]: e.currentTarget.value })} />
-              <span>{name}</span>
+              {name}
             </label>
           )}
         </For>

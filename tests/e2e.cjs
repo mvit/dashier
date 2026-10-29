@@ -1,6 +1,6 @@
 // Drives dist/dashier.html (with the tests/e2e-doc.json report) in headless Chrome/Edge: edit interactions, filters, theming, save -> reload.
 // Usage: npm run build && npm run e2e   (set CHROME_PATH to use a specific browser)
-const puppeteer = require('puppeteer-core');
+const launch = require('./browser.cjs');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const zlib = require('zlib');
@@ -14,7 +14,6 @@ fs.writeFileSync(FILE, fs.readFileSync('dist/dashier.html', 'utf8').replace(
   (_, open, close) => open + fs.readFileSync('tests/e2e-doc.json', 'utf8') + close
 ));
 const URL = 'file:///' + FILE.replace(/\\/g, '/');
-const executablePath = require('./tests/browser.cjs');
 
 let failures = 0;
 const check = (name, ok, extra = '') => {
@@ -24,12 +23,9 @@ const check = (name, ok, extra = '') => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  if (!executablePath) throw new Error('No Chrome/Edge found; set CHROME_PATH');
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-'));
 
-  // a profile of our own: without one, Edge on Windows can refuse to start ("The browser is already running")
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-profile-'));
-  const browser = await puppeteer.launch({ executablePath, headless: true, userDataDir, args: ['--window-size=1600,1000'] });
+  const browser = await launch(['--window-size=1600,1000']);
   const page = await browser.newPage();
   await page.setViewport({ width: 1600, height: 1000 });
   const errors = [];
@@ -976,7 +972,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await opB.select('f:revenue');
   // the Format field, by its label
   await page.evaluate(() => {
-    const s = [...document.querySelectorAll('.d-measure-dialog .d-mfield')].find((f) => f.querySelector('span')?.textContent === 'Format').querySelector('select');
+    const s = [...document.querySelectorAll('.d-measure-dialog .d-mfield')].find((f) => f.firstChild?.textContent?.trim() === 'Format').querySelector('select');
     s.value = 'percent';
     s.dispatchEvent(new Event('change', { bubbles: true }));
   });
@@ -1059,8 +1055,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('saved doc keeps the page filter', doc.pages[0].filters?.[0]?.values?.[0] === 'Europe');
     check('saved doc keeps the measures', (doc.measures || []).map((m) => m.name).join() === 'EU revenue,Europe share' && doc.measures[1].a.measure === 'EU revenue', JSON.stringify(doc.measures));
     check('saved doc keeps the theme', doc.theme?.background === '#fbf6f0' && !('branding' in doc.theme), JSON.stringify(doc.theme));
-    check('saved payload is still gzip+base64', doc.sources.regional_metrics.encoding === 'gzip+base64');
-    check('an older row-CSV table is saved as columns too (reopened below)', doc.sources.regional_metrics.format === 'csv-columns');
+    check('saved payload is still gzip+base64, stored as columns', doc.sources.regional_metrics.encoding === 'gzip+base64' && doc.sources.regional_metrics.format === 'csv-columns');
     const targets = doc.sources.region_targets;
     // a renamed table is stored as columns from then on: a line per column, its name first
     const unpack = (src) => zlib.gunzipSync(Buffer.from(src.payload, 'base64')).toString().split('\n');
@@ -1089,8 +1084,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ── a star schema: filters on a dimension's attributes reach the fact ─────────
   {
-    const csv = (t) => zlib.gzipSync(t).toString('base64');
-    const src = (text, structure) => ({ format: 'csv', encoding: 'gzip+base64', structure, payload: csv(text) });
+    // a table written as rows here, stored as columns (a line each: its name, then its values)
+    const columns = (t) => { const rows = t.trim().split('\n').map((r) => r.split(',')); return rows[0].map((_, i) => rows.map((r) => r[i]).join(',')).join('\n'); };
+    const src = (text, structure) => ({ format: 'csv-columns', encoding: 'gzip+base64', structure, payload: zlib.gzipSync(columns(text)).toString('base64') });
     const card = (id, x, filters) => ({ id, type: 'card', x, y: 0, w: 3, h: 2, sourceId: 'fact_sales', aggregation: { method: 'sum', field: 'revenue' }, format: 'integer', filters });
     const star = {
       format: 'dashier', version: 1, title: 'Star',
@@ -1255,6 +1251,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const plain = await cards(page);
     await share(page, 'Encrypt with password');
     await page.waitForSelector('.d-password');
+    await sleep(100);
+    check('the password dialog opens with its first field focused', await page.evaluate(() => document.activeElement === document.querySelector('.d-password input')));
     check('the encrypt dialog warns that a lost password loses the data', (await page.$eval('.d-password', (e) => e.textContent)).includes('If you lose the password, the data cannot be recovered.'));
     await submit(page, 's3cret!', 'typo');
     await page.waitForSelector('.d-form-error');
@@ -1390,47 +1388,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await p6.close();
     }
 
-    // older files store tables as rows (CSV or JSON): they open, and a save writes every table as columns
+    // a JSON table pasted in the editor is stored as columns, value for value, and reopens with the rest
     {
-      const old = JSON.parse(fs.readFileSync('tests/e2e-doc.json', 'utf8'));
-      const t = old.sources.region_targets;
-      const [head, ...rows] = zlib.gunzipSync(Buffer.from(t.payload, 'base64')).toString().trim().split('\n').map((l) => l.split(','));
-      Object.assign(t, { format: 'json', payload: zlib.gzipSync(JSON.stringify(rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]]))))).toString('base64') });
-      const oldFile = path.join(path.dirname(FILE), 'old.html');
-      fs.writeFileSync(oldFile, fs.readFileSync(FILE, 'utf8').replace(/(id="dashier-doc">)[\s\S]*?(<\/script>)/, (_, a, b) => a + JSON.stringify(old) + b));
-      // saved or exported straight after opening, while the rewrite to columns is still running (made slow here):
-      // what's written is columns all the same
-      const p8 = await browser.newPage();
-      p8.on('pageerror', (e) => errors.push('save at once: ' + e.message));
-      await p8.evaluateOnNewDocument(() => {
-        delete window.showSaveFilePicker;
-        const C = window.CompressionStream;
-        window.CompressionStream = function (f) {
-          const wait = new TransformStream({ start: () => new Promise((r) => setTimeout(r, 1500)) });
-          return { writable: wait.writable, readable: wait.readable.pipeThrough(new C(f)) };
-        };
-      });
-      await p8.goto('file:///' + oldFile.replace(/\\/g, '/'));
-      await p8.waitForSelector('.card-value');
-      let dir8 = await saveDir(p8);
-      await share(p8, '^Save');
-      const first = await download(dir8);
-      dir8 = await saveDir(p8);
-      await share(p8, 'Export JSON');
-      const exported = await download(dir8, '.dashier.json');
-      const formats = (d) => d && Object.values(d.sources).map((s) => s.format).join();
-      check('a save straight after opening an older file writes every table as columns', formats(first && docOf(first)) === 'csv-columns,csv-columns', formats(first && docOf(first)));
-      check('…and so does Export JSON', formats(exported && JSON.parse(fs.readFileSync(exported, 'utf8'))) === 'csv-columns,csv-columns');
-      await p8.close();
-
       const p7 = await browser.newPage();
-      p7.on('pageerror', (e) => errors.push('old formats: ' + e.message));
+      p7.on('pageerror', (e) => errors.push('json paste: ' + e.message));
       await p7.evaluateOnNewDocument(() => { delete window.showSaveFilePicker; });
-      await p7.goto('file:///' + oldFile.replace(/\\/g, '/'));
+      await p7.goto(URL);
       await p7.waitForSelector('.card-value');
       const before = await cards(p7);
-      check('a file with row-CSV and JSON tables opens with their data', before === plain, before);
-      // a JSON table added in the editor
       await p7.click('.d-get-data-btn');
       await p7.click('.d-paste-btn');
       await p7.type('.modal-dialog textarea', '[{"k":"a","n":1},{"k":"b, c","n":2.5}]');
@@ -1445,8 +1410,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const saved = await download(dir);
       const d = saved && docOf(saved);
       const lines = (id) => zlib.gunzipSync(Buffer.from(d.sources[id].payload, 'base64')).toString().split('\n');
-      check('…and saves every table as columns (row CSV, JSON, and a JSON paste)', !!d && Object.values(d.sources).every((s) => s.format === 'csv-columns') &&
-        lines('region_targets')[0].startsWith(head[0] + ',' + rows[0][0]) && lines('pasted').join('|') === 'k,a,"b, c"|n,1,2.5', d && lines('pasted').join('|'));
+      check('a pasted JSON table is saved as columns, value for value', !!d && Object.values(d.sources).every((s) => s.format === 'csv-columns') &&
+        lines('pasted').join('|') === 'k,a,"b, c"|n,1,2.5', d && lines('pasted').join('|'));
       await p7.goto('file:///' + saved.replace(/\\/g, '/'));
       await p7.waitForSelector('.card-value');
       await sleep(300);

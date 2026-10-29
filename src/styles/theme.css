@@ -578,7 +578,7 @@ kbd { margin-left: auto; padding-left: 14px; font: inherit; font-size: 10px; opa
 .d-measure-preview { padding: 10px 12px; font-size: 13px; color: var(--ink-2); background: var(--chrome); border: 1px solid var(--line); border-radius: 8px; }
 .d-measure-preview b { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
 .d-measure-preview.muted { color: var(--muted); }
-.d-measure-delete { color: #ef4444; }
+.d-measure-delete { color: #ef4444; margin-right: auto; }
 
 /* Format pane: searchable sections, each a card with an optional switch, a changed dot and a reset */
 .d-fpane { display: flex; flex-direction: column; gap: 6px; }

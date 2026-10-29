@@ -63,7 +63,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
         <Show when={style() === 'dates'}>
           <div class="d-slicer-range">
             {dateInput('from')}
-            <span>–</span>
+            –
             {dateInput('to')}
           </div>
         </Show>
@@ -71,7 +71,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
         <Show when={style() === 'range'}>
           <div class="d-slicer-range">
             {boundInput('min')}
-            <span>–</span>
+            –
             {boundInput('max')}
           </div>
           <Show when={options().min != null && options().max! > options().min!}>
@@ -114,7 +114,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
               {(v) => (
                 <label class="d-checkbox-label">
                   <input type={el().single ? 'radio' : 'checkbox'} checked={picked().includes(v)} onClick={() => toggle(v)} />
-                  <span>{show(v)}</span>
+                  {show(v)}
                 </label>
               )}
             </For>

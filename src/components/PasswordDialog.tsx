@@ -1,4 +1,5 @@
 import { Component, Show, createSignal } from 'solid-js';
+import { Modal } from './Modal';
 
 /**
  * Asks for the file's password: once to open its data, or twice to encrypt it (`confirm`). `onSubmit` resolves to
@@ -23,24 +24,22 @@ export const PasswordDialog: Component<{ confirm?: boolean; onSubmit: (password:
   const field = (placeholder: string) => <input type="password" class="d-input" placeholder={placeholder} required />;
 
   return (
-    <div class="modal-backdrop">
-      <form class="modal-dialog d-about d-password" onSubmit={submit} ref={(f) => setTimeout(() => f.querySelector('input')?.focus())}>
-        <h3>{props.confirm ? 'Encrypt with password' : 'This report is encrypted'}</h3>
-        {field('Password')}
-        <Show when={props.confirm}>
-          {field('Password again')}
-          <p><b>If you lose the password, the data cannot be recovered.</b></p>
+    <Modal class="d-about d-password" onSubmit={submit} ref={(f) => setTimeout(() => f.querySelector('input')?.focus())}>
+      <h3>{props.confirm ? 'Encrypt with password' : 'This report is encrypted'}</h3>
+      {field('Password')}
+      <Show when={props.confirm}>
+        {field('Password again')}
+        <p><b>If you lose the password, the data cannot be recovered.</b></p>
+      </Show>
+      <Show when={error()}>
+        <p class="d-form-error" role="alert">{error()}</p>
+      </Show>
+      <div class="d-row">
+        <Show when={props.onClose}>
+          <button type="button" class="btn-secondary" onClick={() => props.onClose!()}>Cancel</button>
         </Show>
-        <Show when={error()}>
-          <p class="d-form-error" role="alert">{error()}</p>
-        </Show>
-        <div class="d-row">
-          <Show when={props.onClose}>
-            <button type="button" class="btn-secondary" onClick={() => props.onClose!()}>Cancel</button>
-          </Show>
-          <button class="btn-primary">{props.confirm ? 'Encrypt' : 'Open'}</button>
-        </div>
-      </form>
-    </div>
+        <button class="btn-primary">{props.confirm ? 'Encrypt' : 'Open'}</button>
+      </div>
+    </Modal>
   );
 };

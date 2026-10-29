@@ -59,17 +59,34 @@ const mapParts = (f: Frame, length: number, fn: (p: Part) => Part): Frame => ({
 export const subset = (f: Frame, positions: Int32Array) =>
   mapParts(f, positions.length, p => ({ table: p.table, ids: p.ids ? positions.map(k => p.ids![k]) : positions }));
 
+/**
+ * For a dictionary column (dates, repeated text): its words and each frame row's code (−1 = none), so work that
+ * depends only on the value is done once per word, not once per row. Null for other columns.
+ */
+function codesOf(f: Frame, field: string): { words: string[]; code: (k: number) => number } | null {
+  const at = locate(f, field);
+  if (at?.[1].kind !== 'dict') return null;
+  const [{ ids }, { codes, words }] = at as [Part, { codes: Uint32Array; words: string[] }];
+  return { words, code: ids ? k => (ids[k] < 0 ? -1 : codes[ids[k]]) : k => codes[k] };
+}
+
 /** Rows passing every filter. Filters on fields the frame doesn't have are ignored. */
 export function filterFrame(f: Frame, filters: DashFilter[]): Frame {
   const tests = filters.flatMap(flt => {
+    const test = filterTest(flt), d = codesOf(f, flt.field);
+    if (d) {
+      // a dictionary column is tested once per word
+      const pass = d.words.map(test), none = test(null);
+      return [(k: number) => { const c = d.code(k); return c < 0 ? none : pass[c]; }];
+    }
     const read = reader(f, flt.field);
-    return read ? [[read, filterTest(flt)] as const] : [];
+    return read ? [(k: number) => test(read(k))] : [];
   });
   if (!tests.length) return f;
   const keep = new Int32Array(f.length);
   let n = 0;
   outer: for (let k = 0; k < f.length; k++) {
-    for (const [read, test] of tests) if (!test(read(k))) continue outer;
+    for (const t of tests) if (!t(k)) continue outer;
     keep[n++] = k;
   }
   return n === f.length ? f : subset(f, keep.slice(0, n));
@@ -104,17 +121,27 @@ export function joinFrame(left: Frame, leftKey: string, right: ColumnTable, righ
       const list = byKey.get(key);
       list ? list.push(r) : byKey.set(key, [r]);
     }
-  const outL: number[] = [];
+  const hitsOf = (v: unknown) => (v == null || v === '' ? undefined : byKey.get(keyText(v))) ?? NONE;
+  // a dictionary key column is looked up once per word
+  const d = codesOf(left, leftKey);
+  const per = d?.words.map(hitsOf);
+  const hitsAt = (k: number) => (d ? (d.code(k) < 0 ? NONE : per![d.code(k)]) : hitsOf(lk?.(k)));
+  let out: Frame;
   const outR: number[] = [];
-  for (let k = 0; k < left.length; k++) {
-    const v = lk?.(k);
-    const hits = (v == null || v === '' ? undefined : byKey.get(keyText(v))) ?? [-1];
-    for (const r of lookup ? hits.slice(0, 1) : hits) outL.push(k), outR.push(r);
+  if (lookup) {
+    // one row each: the frame's rows stay as they are
+    for (let k = 0; k < left.length; k++) outR.push(hitsAt(k)[0]);
+    out = mapParts(left, left.length, p => p);
+  } else {
+    const outL: number[] = [];
+    for (let k = 0; k < left.length; k++) for (const r of hitsAt(k)) outL.push(k), outR.push(r);
+    const at = Int32Array.from(outL);
+    out = mapParts(left, at.length, p => ({ table: p.table, ids: p.ids ? at.map(k => p.ids![k]) : at }));
   }
-  const out = mapParts(left, outL.length, p => ({ table: p.table, ids: Int32Array.from(outL, k => (p.ids ? p.ids[k] : k)) }));
   out.joined[name] = { table: right, ids: Int32Array.from(outR) };
   return out;
 }
+const NONE = [-1];
 
 /** Distinct non-blank values of a field, as strings (dictionary columns answer from their dictionary). */
 export function distinctOf(f: Frame, field: string, key: (v: unknown) => string = String): string[] {

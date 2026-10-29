@@ -1,7 +1,7 @@
-// The phone layout, in headless Chrome/Edge via Playwright: the sample report (with the app from dist/) at 390×844,
-// 360×800 and on its side at 844×390, every page checked and screenshotted to test-results/phone/.
+// The phone layout, in headless Chrome/Edge: the sample report (with the app from dist/) at 390×844, 360×800 and on
+// its side at 844×390, every page checked and screenshotted to test-results/phone/.
 // Usage: npm run build && npm run phone   (set CHROME_PATH to use a specific browser)
-const { chromium } = require('playwright-core');
+const launch = require('./browser.cjs');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -20,12 +20,14 @@ const check = (name, ok, extra = '') => {
   console.log(`${ok ? '✓ PASS' : '✗ FAIL'}: ${name}${extra ? ' — ' + extra : ''}`);
   if (!ok) failures++;
 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: require('./tests/browser.cjs') });
+  const browser = await launch();
   for (const [width, height] of [[390, 844], [360, 800], [844, 390]]) {
     const at = `${width}×${height}`;
-    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const page = await browser.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(pathToFileURL(FILE).href);
@@ -33,12 +35,13 @@ const check = (name, ok, extra = '') => {
     check(`${at}: the editor's chrome and layout controls are hidden`, await page.evaluate(() =>
       ['.ed-topbar', '.d-right-panes-strip', '.ed-statusbar', '.d-add-page-btn', '.d-exit-preview'].every((s) => !document.querySelector(s) || getComputedStyle(document.querySelector(s)).display === 'none')));
 
-    const tab = await page.locator('.d-bottom-tab').first().boundingBox();
-    check(`${at}: page tabs are thumb-sized (44px+), swiped rather than arrowed`, tab.height >= 44 && !(await page.locator('.d-tabs-arrow').first().isVisible().catch(() => false)), `${tab.height}px`);
+    const tab = await (await page.$('.d-bottom-tab')).boundingBox();
+    const arrows = await page.$('.d-tabs-arrow');
+    check(`${at}: page tabs are thumb-sized (44px+), swiped rather than arrowed`, tab.height >= 44 && !(arrows && (await arrows.isVisible())), `${tab.height}px`);
 
     for (const p of doc.pages) {
-      await page.locator('.d-bottom-tab', { hasText: p.title }).first().click();
-      await page.waitForTimeout(400); // charts draw at their tile's size
+      await page.$$eval('.d-bottom-tab', (els, title) => els.find((e) => e.textContent.trim() === title).click(), p.title);
+      await sleep(400); // charts draw at their tile's size
       // every tile as laid out, in the order a reader meets them
       const tiles = await page.$$eval('.d-visual-container', (els) => els.map((e) => ({ id: e.dataset.id, type: e.dataset.type, ...e.getBoundingClientRect().toJSON(), shown: getComputedStyle(e).display !== 'none' })));
       const shown = tiles.filter((t) => t.shown).sort((a, b) => a.top - b.top || a.left - b.left);
@@ -58,8 +61,8 @@ const check = (name, ok, extra = '') => {
     }
 
     // filtering: the slicers are in a drawer, opened from a button at the top
-    await page.locator('.d-bottom-tab').first().click();
-    const button = page.locator('.d-drawer-btn');
+    await page.$eval('.d-bottom-tab', (t) => t.click());
+    const button = await page.waitForSelector('.d-drawer-btn');
     const box = await button.boundingBox();
     check(`${at}: a Filters button at the top of the page`, !!box && box.y < 20 && (await button.evaluate((b) => getComputedStyle(b).position)) === 'fixed');
     const values = () => page.$$eval('.card-value', (es) => es.map((e) => e.textContent).join(' | '));
@@ -67,9 +70,9 @@ const check = (name, ok, extra = '') => {
     await button.tap();
     await page.waitForSelector('.d-drawer .d-slicer');
     await page.screenshot({ path: `${OUT}/${width}x${height}-filters.png` });
-    await page.locator('.d-drawer .d-slicer-tile').first().tap();
-    await page.locator('.d-drawer .btn-primary').tap();
-    await page.waitForTimeout(300);
+    await (await page.$('.d-drawer .d-slicer-tile')).tap();
+    await (await page.$('.d-drawer .btn-primary')).tap();
+    await sleep(300);
     check(`${at}: a slicer picked in the drawer filters the page`, !(await page.$('.d-drawer')) && (await values()) !== before, `${before} → ${await values()}`);
     await page.evaluate(() => scrollTo(0, 400));
     check(`${at}: the Filters button stays at the top while scrolling`, ((await button.boundingBox())?.y ?? 99) < 20);
@@ -77,14 +80,14 @@ const check = (name, ok, extra = '') => {
     // tooltips by touch: a tap shows one (and it stays after the finger lifts), two fingers or a tap elsewhere hide it
     await page.evaluate(() => scrollTo(0, 0));
     const tip = () => page.evaluate(() => getComputedStyle(document.querySelector('.d-tip') ?? document.body).display === 'block');
-    const plot = page.locator('.d-visual-container[data-type="chart"] .d-chart-plot').first();
-    await plot.scrollIntoViewIfNeeded();
+    const plot = await page.$('.d-visual-container[data-type="chart"] .d-chart-plot');
+    await plot.scrollIntoView();
     const pb = await plot.boundingBox();
     const [cx, cy] = [pb.x + pb.width / 2, pb.y + pb.height / 2];
     await page.touchscreen.tap(cx, cy);
-    await page.waitForTimeout(300);
+    await sleep(300);
     check(`${at}: a tap on a chart shows its tooltip, which stays once the finger lifts`, await tip());
-    const cdp = await page.context().newCDPSession(page);
+    const cdp = await page.createCDPSession();
     const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
     await touch('touchStart', [{ x: cx, y: cy, id: 1 }]);
     await touch('touchStart', [{ x: cx, y: cy, id: 1 }, { x: cx + 40, y: cy + 10, id: 2 }]);
@@ -92,7 +95,7 @@ const check = (name, ok, extra = '') => {
     check(`${at}: no tooltip while two fingers are down (a pinch)`, !(await tip()));
     await touch('touchEnd', []);
     await page.touchscreen.tap(cx, cy);
-    await page.waitForTimeout(200);
+    await sleep(200);
     // the same as a phone sends it (pointer events by touch, then a leave once the finger lifts), deterministically
     const seq = await page.evaluate(([x, y]) => {
       const host = document.querySelector('.d-visual-container[data-type="chart"] .d-chart-plot');
@@ -107,7 +110,7 @@ const check = (name, ok, extra = '') => {
       return { lifted, pinch };
     }, [cx, cy]);
     check(`${at}: touch pointer events: a tap's tooltip outlives the lift, and a pinch shows none`, seq.lifted && !seq.pinch, JSON.stringify(seq));
-    const outside = await page.locator('.d-bottom-pages-bar').boundingBox();
+    const outside = await (await page.$('.d-bottom-pages-bar')).boundingBox();
     await page.touchscreen.tap(outside.x + outside.width - 4, outside.y + 4);
     check(`${at}: a tap outside the chart hides the tooltip`, !(await tip()));
     check(`${at}: no page errors`, !errors.length, errors.join(' | '));

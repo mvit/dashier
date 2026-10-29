@@ -7,13 +7,13 @@ APP = open(os.path.join(ROOT, 'dist', 'dashier.html'), encoding='utf-8').read()
 sys.stdout.reconfigure(encoding='utf-8')  # the check marks, on a Windows console too
 
 
-COLUMNS = False  # store the test tables as columns (csv-columns)
+ROWS = False  # store the test tables as a header row and rows (csv), which is no longer a format
 
 
 def src(cols, types, rows):
     lines = [cols, *rows]
-    text = ''.join(','.join(map(str, r)) + '\n' for r in (zip(*lines) if COLUMNS else lines))
-    return {'format': 'csv-columns' if COLUMNS else 'csv', 'encoding': 'gzip+base64', 'structure': [{'name': c, 'type': t} for c, t in zip(cols, types)],
+    text = ''.join(','.join(map(str, r)) + '\n' for r in (lines if ROWS else zip(*lines)))
+    return {'format': 'csv' if ROWS else 'csv-columns', 'encoding': 'gzip+base64', 'structure': [{'name': c, 'type': t} for c, t in zip(cols, types)],
             'payload': base64.b64encode(gzip.compress(text.encode())).decode()}
 
 
@@ -52,10 +52,10 @@ check('a quarter pick that matches nothing fails', "has no ['2023 Q1']" in valid
 check('a quarter pick written in the wrong case fails (the app writes "2024 Q1")', "has no ['2024 q1']" in validate('2024 q1'))
 derived = re.findall(r'WARN: (\S+) looks derived', good)
 check('"looks derived" warns on a derived number, not on keys, ids or text', derived == ['fact_sales.gross_margin_pct'], derived)
-check('an older row-CSV table passes, with a warning that it is saved as columns', 'stored as rows (csv' in good)
-COLUMNS = True
-cols = validate('2024 Q2')
-check('tables stored as columns validate the same, without that warning', 'RESULT: PASS' in cols and 'stored as rows' not in cols and "has no ['2023 Q1']" in validate('2023 Q1'), cols)
+ROWS = True
+rows = validate('2024 Q2')
+check('a table stored as rows (the old csv format) fails', "FAIL: fact_sales: format 'csv'" in rows and 'RESULT: FAIL' in rows, rows)
+ROWS = False
 
 # build_report.py packs a CSV as columns (plain gzip) that read back with the guide's one-liner
 with tempfile.TemporaryDirectory() as d:

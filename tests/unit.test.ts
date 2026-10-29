@@ -1020,7 +1020,7 @@ test('columns: a table stored as columns reads as its CSV does, round trip inclu
   assert.deepEqual([t.length, t.names, rowsOf(t)], [3, ['a', 'b'], [[1, 'x'], [2, ''], [3, '']]]);
 });
 
-test('columns: the old row CSV and JSON payloads still load', async () => {
+test('columns: a CSV or JSON being added reads into the same columns', async () => {
   const structure = [{ name: 'a', type: 'int' as const }, { name: 'b', type: 'string' as const }];
   const csv = await textToColumnsAsync('a,b\n1,x\n2,y', 'csv', structure, () => {});
   const json = await textToColumnsAsync('[{"a":1,"b":"x"},{"a":2,"b":"y"}]', 'json', structure, () => {});
@@ -1053,4 +1053,27 @@ test('columns: a column of exactly 10,000 cells (name + 9,999 values) gets no ex
     const t = await textToColumnsAsync(await columnsText(csv, 'csv'), 'csv-columns', [{ name: 'id', type: 'int' }, { name: 'v', type: 'string' }], () => {});
     assert.equal(t.length, n, `${n} rows`);
   }
+});
+
+test('dictionary columns: filters, joins and pivots work per word and match a row-by-row reading', () => {
+  const days = ['2024-01-05', '2024-02-10', '', '2024-01-20'];
+  const rows = Array.from({ length: 40 }, (_, i) => ({ d: days[i % 4], s: ['S1', 'S2', 'S9', ''][i % 4 === 1 ? 1 : (i >> 2) % 4], c: ['a', 'b'][i % 2], v: i }));
+  const fact = columnsFromRows(rows, [{ name: 'd', type: 'datetime' }, { name: 's', type: 'string' }, { name: 'c', type: 'string' }, { name: 'v', type: 'int' }]);
+  const dim = columnsFromRows([{ s: 's1', r: 'North' }, { s: 'S2', r: 'South' }], [{ name: 's', type: 'string' }, { name: 'r', type: 'string' }]);
+  const joined = joinFrame(tableFrame(fact), 's', dim, 's', 'dim', true);
+  const plain = frameRows(joined);
+  // S9 and blanks match nothing: blank regions
+  assert.deepEqual(plain.map(r => r['dim.r']), rows.map(r => ({ S1: 'North', S2: 'South' } as any)[r.s] ?? null));
+  const f = [{ field: 'dim.r', values: ['North', 'South'] }, { field: 'c', values: ['b'] }];
+  assert.deepEqual(frameRows(filterFrame(joined, f)).map(r => r.v), plain.filter(r => r['dim.r'] && r.c === 'b').map(r => r.v));
+  assert.equal(filterFrame(joined, [{ field: 'dim.r', min: 0 }]).length, 0, 'a blank isn\'t a number');
+  const p = pivot(filterFrame(joined, [{ field: 'c', values: ['a'] }]), { field: 'd', part: 'month' }, 'v', 'dim.r');
+  const want = new Map<string, Map<string, number>>();
+  for (const r of plain.filter(r => r.c === 'a')) {
+    const g = (r['dim.r'] as string) ?? '(Blank)', m = want.get(g) ?? want.set(g, new Map()).get(g)!, x = datePartKey(String(r.d ?? ''), 'month') || '(Blank)';
+    m.set(x, (m.get(x) ?? 0) + (r.v as number));
+  }
+  assert.deepEqual([...p.groups].map(([g, m]) => [g, [...m]]), [...want].map(([g, m]) => [g, [...m]]));
+  assert.deepEqual(p.cats, ['2024-01', '(Blank)']);
+  assert.deepEqual([...pivot(joined, 'c', 'v').groups.get('')!], [...pivot(joined, 'c', 'v').totals], 'without a group, the cells are the totals');
 });

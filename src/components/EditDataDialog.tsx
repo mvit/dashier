@@ -1,5 +1,6 @@
 import { Component, For, JSX, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
+import { Modal } from './Modal';
 import { DashRelationship, FieldType, isNumericType } from '../types/model';
 import { DataGrid, PROFILE } from './DataGrid';
 import { frameRows } from '../runtime/frames';
@@ -168,174 +169,172 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
   );
 
   return (
-    <div class="modal-backdrop" onClick={props.onClose}>
-      <div class="modal-dialog d-editdata" onClick={(e) => e.stopPropagation()}>
-        <div class="modal-header">
-          <div class="d-editdata-title">
-            <span class="d-editdata-icon">▦</span>
-            <div>
-              <input
-                class="d-title-input"
-                value={id()}
-                title="Rename table"
-                spellcheck={false}
-                onChange={(e) => rename(e.currentTarget)}
-                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-              />
-              <div class="d-editdata-meta">
-                {src()?.format.toUpperCase()} · {frame().length.toLocaleString()} rows · {src()?.structure.length ?? 0} columns ·{' '}
-                {src() ? (payloadSize(src().payload) / 1024).toFixed(1) : 0} KB stored
-              </div>
+    <Modal class="d-editdata" onClose={props.onClose}>
+      <div class="modal-header">
+        <div class="d-editdata-title">
+          <span class="d-editdata-icon">▦</span>
+          <div>
+            <input
+              class="d-title-input"
+              value={id()}
+              title="Rename table"
+              spellcheck={false}
+              onChange={(e) => rename(e.currentTarget)}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+            <div class="d-editdata-meta">
+              {frame().length.toLocaleString()} rows · {src()?.structure.length ?? 0} columns ·{' '}
+              {src() ? (payloadSize(src().payload) / 1024).toFixed(1) : 0} KB stored
             </div>
           </div>
-          <div class="d-editdata-actions">
-            <button class="btn-secondary d-replace-btn" title="Load an updated CSV or JSON file into this table" onClick={props.onReplace}>
-              Replace data…
-            </button>
-            <button class="btn-close-modal" title="Close (Esc)" onClick={props.onClose}>×</button>
-          </div>
         </div>
-
-        <div class="d-dtabs d-dialog-tabs">
-          {tabBtn('data', 'Data')}
-          {tabBtn('relationships', 'Relationships', rels().length)}
-          {tabBtn('usage', 'Used by', usages().length)}
-        </div>
-
-        <Show when={error()}>
-          <div class="d-form-error d-editdata-error">{error()}</div>
-        </Show>
-
-        <Show when={src()}>
-          <Show when={tab() === 'data'}>
-            <div class="d-editdata-hint">
-              Click a column name to rename it everywhere it's used. Click a type badge to change how its values are read; the
-              stored data is unchanged, and values that don't fit the type show as blank.
-            </div>
-            <div class="modal-body d-editdata-grid">
-              <DataGrid
-                columns={src().structure}
-                rows={gridRows()}
-                total={frame().length}
-                limit={200}
-                onType={(col, t) => store.setColumnType(id(), col, t as FieldType)}
-                onSortBy={(col, by) => store.setSortBy(id(), col, by)}
-                onRename={async (column, input) => {
-                  if (!ok(await store.renameColumn(id(), column, input.value))) input.value = column;
-                }}
-              />
-            </div>
-          </Show>
-
-          <Show when={tab() === 'relationships'}>
-            <div class="modal-body d-rels-body">
-              <p class="d-editdata-lead">
-                A relationship links a column of <b>{id()}</b> to a column of another table. The one side (unique values, a
-                dimension) filters the many side (its facts), through further relationships too; a visual can use the fields and
-                measures of any connected table.
-              </p>
-              <Show when={rels().length || adding()} fallback={<div class="d-empty-state">No relationships yet.</div>}>
-                <div class="d-rels">
-                  <For each={rels()}>
-                    {(r) => {
-                      const d = () => draftOf(r.index);
-                      const rate = () => matchRate(r.mine.field, r.other);
-                      return (
-                        <RelCard table={id()} d={d()} flow={flow(d())} set={(patch) => change(d(), patch)}>
-                          <span class="d-rel-meta">
-                            <Show when={repeated(d()).length}>
-                              <span class="d-badge warn" title="A one side should have unique values: rows match its first row only">{repeated(d())[0]} repeats values</span>
-                            </Show>
-                            <Show when={store.isNumericRef(id(), r.mine.field) !== store.isNumericRef(r.other.table, r.other.field)}>
-                              <span class="d-badge warn">types differ</span>
-                            </Show>
-                            <Show when={rate() != null}>
-                              <span class={`d-badge ${rate()! < 50 ? 'warn' : 'ok'}`}>{rate()}% match</span>
-                            </Show>
-                          </span>
-                          <button
-                            class="d-rel-x"
-                            title="Delete relationship"
-                            onClick={() => {
-                              const n = store.linkedUsages(r.index).length;
-                              (!n || confirm(`${n} visual${n > 1 ? 's use' : ' uses'} fields through this relationship and will lose them. Delete it?`)) && store.removeRelationship(r.index);
-                            }}
-                          >
-                            ×
-                          </button>
-                        </RelCard>
-                      );
-                    }}
-                  </For>
-                  <Show when={adding()}>
-                    {(d) => (
-                      <RelCard table={id()} d={d()} flow={flow(d())} draft set={(patch) => change(d(), patch)}>
-                        <button class="btn-secondary" onClick={() => setAdding(null)}>Cancel</button>
-                        <button class="btn-primary" disabled={!d().mine || !d().table || !d().field} onClick={() => ok(store.saveRelationship(relOf(d()))) && setAdding(null)}>
-                          Create
-                        </button>
-                      </RelCard>
-                    )}
-                  </Show>
-                </div>
-              </Show>
-              <Show when={!adding()}>
-                {others().length ? (
-                  <button class="btn-secondary d-new-rel" onClick={() => setAdding({ index: -1, mine: '', table: '', field: '', card: '*:1', both: false })}>+ New relationship</button>
-                ) : (
-                  <p class="d-hint">Add another table (Get data) to relate it to this one.</p>
-                )}
-              </Show>
-              <Show when={suggestions().length}>
-                <div class="d-suggests">
-                  <span class="d-suggests-label">Suggested</span>
-                  <For each={suggestions()}>
-                    {(x) => (
-                      <button class="d-suggest" title="Create this relationship (its cardinality read from the data)" onClick={() => ok(store.saveRelationship(relOf({ index: -1, ...x, card: detect(x.mine, x.table, x.field), both: false })))}>
-                        {x.mine} ⟷ {x.table}.{x.field}
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
-          </Show>
-
-          <Show when={tab() === 'usage'}>
-            <div class="modal-body">
-              <Show when={usages().length} fallback={<div class="d-empty-state">No visuals use this table yet.</div>}>
-                <For each={usageByPage()}>
-                  {(group) => (
-                    <div class="d-usage-group">
-                      <div class="d-usage-page">{group[0].page.title}</div>
-                      <div class="d-usages">
-                        <For each={group}>
-                          {(u) => (
-                            <button class="d-usage" title="Go to this visual" onClick={() => (store.selectElement(u.page.id, u.element.id), props.onClose())}>
-                              <span class="d-usage-icon">{KIND_ICONS[u.element.type] ?? '▭'}</span>
-                              <span class="d-usage-main">
-                                <b>{u.element.title || u.element.type}</b>
-                                <span class="d-usage-fields">
-                                  <For each={u.fields}>{(f) => <span class="d-usage-field">{f}</span>}</For>
-                                </span>
-                              </span>
-                              <span class="d-usage-go">Go to →</span>
-                            </button>
-                          )}
-                        </For>
-                      </div>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </div>
-          </Show>
-        </Show>
-
-        <div class="modal-footer">
-          <button class="btn-primary" onClick={props.onClose}>Done</button>
+        <div class="d-editdata-actions">
+          <button class="btn-secondary d-replace-btn" title="Load an updated CSV or JSON file into this table" onClick={props.onReplace}>
+            Replace data…
+          </button>
+          <button class="btn-close-modal" title="Close (Esc)" onClick={props.onClose}>×</button>
         </div>
       </div>
-    </div>
+
+      <div class="d-dtabs d-dialog-tabs">
+        {tabBtn('data', 'Data')}
+        {tabBtn('relationships', 'Relationships', rels().length)}
+        {tabBtn('usage', 'Used by', usages().length)}
+      </div>
+
+      <Show when={error()}>
+        <div class="d-form-error d-editdata-error">{error()}</div>
+      </Show>
+
+      <Show when={src()}>
+        <Show when={tab() === 'data'}>
+          <div class="d-editdata-hint">
+            Click a column name to rename it everywhere it's used. Click a type badge to change how its values are read; the
+            stored data is unchanged, and values that don't fit the type show as blank.
+          </div>
+          <div class="modal-body d-editdata-grid">
+            <DataGrid
+              columns={src().structure}
+              rows={gridRows()}
+              total={frame().length}
+              limit={200}
+              onType={(col, t) => store.setColumnType(id(), col, t as FieldType)}
+              onSortBy={(col, by) => store.setSortBy(id(), col, by)}
+              onRename={async (column, input) => {
+                if (!ok(await store.renameColumn(id(), column, input.value))) input.value = column;
+              }}
+            />
+          </div>
+        </Show>
+
+        <Show when={tab() === 'relationships'}>
+          <div class="modal-body d-rels-body">
+            <p class="d-editdata-lead">
+              A relationship links a column of <b>{id()}</b> to a column of another table. The one side (unique values, a
+              dimension) filters the many side (its facts), through further relationships too; a visual can use the fields and
+              measures of any connected table.
+            </p>
+            <Show when={rels().length || adding()} fallback={<div class="d-empty-state">No relationships yet.</div>}>
+              <div class="d-rels">
+                <For each={rels()}>
+                  {(r) => {
+                    const d = () => draftOf(r.index);
+                    const rate = () => matchRate(r.mine.field, r.other);
+                    return (
+                      <RelCard table={id()} d={d()} flow={flow(d())} set={(patch) => change(d(), patch)}>
+                        <span class="d-rel-meta">
+                          <Show when={repeated(d()).length}>
+                            <span class="d-badge warn" title="A one side should have unique values: rows match its first row only">{repeated(d())[0]} repeats values</span>
+                          </Show>
+                          <Show when={store.isNumericRef(id(), r.mine.field) !== store.isNumericRef(r.other.table, r.other.field)}>
+                            <span class="d-badge warn">types differ</span>
+                          </Show>
+                          <Show when={rate() != null}>
+                            <span class={`d-badge ${rate()! < 50 ? 'warn' : 'ok'}`}>{rate()}% match</span>
+                          </Show>
+                        </span>
+                        <button
+                          class="d-rel-x"
+                          title="Delete relationship"
+                          onClick={() => {
+                            const n = store.linkedUsages(r.index).length;
+                            (!n || confirm(`${n} visual${n > 1 ? 's use' : ' uses'} fields through this relationship and will lose them. Delete it?`)) && store.removeRelationship(r.index);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </RelCard>
+                    );
+                  }}
+                </For>
+                <Show when={adding()}>
+                  {(d) => (
+                    <RelCard table={id()} d={d()} flow={flow(d())} draft set={(patch) => change(d(), patch)}>
+                      <button class="btn-secondary" onClick={() => setAdding(null)}>Cancel</button>
+                      <button class="btn-primary" disabled={!d().mine || !d().table || !d().field} onClick={() => ok(store.saveRelationship(relOf(d()))) && setAdding(null)}>
+                        Create
+                      </button>
+                    </RelCard>
+                  )}
+                </Show>
+              </div>
+            </Show>
+            <Show when={!adding()}>
+              {others().length ? (
+                <button class="btn-secondary d-new-rel" onClick={() => setAdding({ index: -1, mine: '', table: '', field: '', card: '*:1', both: false })}>+ New relationship</button>
+              ) : (
+                <p class="d-hint">Add another table (Get data) to relate it to this one.</p>
+              )}
+            </Show>
+            <Show when={suggestions().length}>
+              <div class="d-suggests">
+                <span class="d-suggests-label">Suggested</span>
+                <For each={suggestions()}>
+                  {(x) => (
+                    <button class="d-suggest" title="Create this relationship (its cardinality read from the data)" onClick={() => ok(store.saveRelationship(relOf({ index: -1, ...x, card: detect(x.mine, x.table, x.field), both: false })))}>
+                      {x.mine} ⟷ {x.table}.{x.field}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={tab() === 'usage'}>
+          <div class="modal-body">
+            <Show when={usages().length} fallback={<div class="d-empty-state">No visuals use this table yet.</div>}>
+              <For each={usageByPage()}>
+                {(group) => (
+                  <div class="d-usage-group">
+                    <div class="d-usage-page">{group[0].page.title}</div>
+                    <div class="d-usages">
+                      <For each={group}>
+                        {(u) => (
+                          <button class="d-usage" title="Go to this visual" onClick={() => (store.selectElement(u.page.id, u.element.id), props.onClose())}>
+                            <span class="d-usage-icon">{KIND_ICONS[u.element.type] ?? '▭'}</span>
+                            <span class="d-usage-main">
+                              <b>{u.element.title || u.element.type}</b>
+                              <span class="d-usage-fields">
+                                <For each={u.fields}>{(f) => <span class="d-usage-field">{f}</span>}</For>
+                              </span>
+                            </span>
+                            <span class="d-usage-go">Go to →</span>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+        </Show>
+      </Show>
+
+      <div class="modal-footer">
+        <button class="btn-primary" onClick={props.onClose}>Done</button>
+      </div>
+    </Modal>
   );
 };

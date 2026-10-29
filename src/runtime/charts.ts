@@ -239,10 +239,39 @@ export function keyReader(frame: Frame, key: Key): (k: number) => unknown {
 }
 
 /** Sums up frame positions: a field summarized with `method`, or a measure worked out on those rows of the frame. */
-export function reducer(frame: Frame, y: string | MeasureFn, method: AggregationMethod): (pos: number[]) => number | null {
-  if (typeof y === 'function') return pos => y(subset(frame, Int32Array.from(pos)));
+export function reducer(frame: Frame, y: string | MeasureFn, method: AggregationMethod): (pos: ArrayLike<number>) => number | null {
+  if (typeof y === 'function') return pos => y(subset(frame, pos instanceof Int32Array ? pos : Int32Array.from(pos)));
   const read = reader(frame, y);
   return pos => (read ? summarizeRead(pos.length, i => read(pos[i]), method) : null);
+}
+
+/** Each frame row's key, as an index into `names` (first-seen order; a blank is "(Blank)"). Each distinct value is named once. */
+function keyIndex(frame: Frame, key: Key) {
+  const { field, part } = typeof key === 'string' ? { field: key, part: undefined } : key;
+  const read = reader(frame, field) ?? (() => undefined);
+  const names: string[] = [], byValue = new Map<unknown, number>(), byName = new Map<string, number>();
+  const at = new Int32Array(frame.length);
+  for (let k = 0; k < frame.length; k++) {
+    const v = read(k);
+    let i = byValue.get(v);
+    if (i === undefined) {
+      const s = part ? datePartKey(String(v ?? ''), part) : v;
+      const n = s == null || s === '' ? '(Blank)' : String(s);
+      byValue.set(v, (i = byName.get(n) ?? byName.set(n, names.push(n) - 1).get(n)!));
+    }
+    at[k] = i;
+  }
+  return { names, at };
+}
+
+/** Frame positions by bucket (row k is in bucket `of[k]`, 0…n−1), each in row order: slices of one array, no list per cell. */
+function buckets(of: Int32Array, n: number): Int32Array[] {
+  const start = new Int32Array(n + 1);
+  for (let k = 0; k < of.length; k++) start[of[k] + 1]++;
+  for (let b = 0; b < n; b++) start[b + 1] += start[b];
+  const pos = new Int32Array(of.length), next = start.slice(0, n);
+  for (let k = 0; k < of.length; k++) pos[next[of[k]]++] = k;
+  return Array.from({ length: n }, (_, b) => pos.subarray(start[b], start[b + 1]));
 }
 
 /**
@@ -251,28 +280,31 @@ export function reducer(frame: Frame, y: string | MeasureFn, method: Aggregation
  * keep first-seen order; a blank one is "(Blank)".
  */
 export function pivot(frame: Frame, x: Key, y: string | MeasureFn, group?: Key, method: AggregationMethod = 'sum', showAs?: ShowAs) {
-  // each cell collects frame positions, never rows
-  const catVals = new Map<string, number[]>();
-  const cells = new Map<string, Map<string, number[]>>();
-  const add = <K>(m: Map<K, number[]>, key: K, k: number) => (m.get(key) ?? m.set(key, []).get(key)!).push(k);
-  const cat = keyReader(frame, x);
-  const ser = group ? keyReader(frame, group) : null;
-  const name = (v: unknown) => (v == null || v === '' ? '(Blank)' : String(v));
-  for (let k = 0; k < frame.length; k++) {
-    const c = name(cat(k));
-    const g = ser ? name(ser(k)) : '';
-    add(catVals, c, k);
-    add(cells.get(g) ?? cells.set(g, new Map()).get(g)!, c, k);
-  }
+  const cat = keyIndex(frame, x);
+  const ser = group ? keyIndex(frame, group) : null;
   // `any`: some cell had a value (all blank draws nothing)
   let any = false;
   const sum = reducer(frame, y, method);
-  const reduce = (pos: number[]) => {
+  const reduce = (pos: Int32Array) => {
     const v = sum(pos);
     return v == null ? 0 : ((any = true), v);
   };
-  const groups = new Map([...cells].map(([g, m]) => [g, new Map([...m].map(([c, vals]) => [c, reduce(vals)]))]));
-  const totals = new Map([...catVals].map(([c, vals]) => [c, reduce(vals)]));
+  const groups = new Map<string, Map<string, number>>();
+  const cellsOf = (g: string) => groups.get(g) ?? groups.set(g, new Map()).get(g)!;
+  if (ser) {
+    // a cell is an (x, group) pair, numbered in first-seen order
+    const nc = cat.names.length, ids = new Map<number, number>(), cell = new Int32Array(frame.length), cc: number[] = [], cg: number[] = [];
+    for (let k = 0; k < frame.length; k++) {
+      const key = ser.at[k] * nc + cat.at[k];
+      let j = ids.get(key);
+      if (j === undefined) ids.set(key, (j = cc.push(cat.at[k]) - 1)), cg.push(ser.at[k]);
+      cell[k] = j;
+    }
+    buckets(cell, cc.length).forEach((pos, j) => cellsOf(ser.names[cg[j]]).set(cat.names[cc[j]], reduce(pos)));
+  }
+  const totals = new Map(buckets(cat.at, cat.names.length).map((pos, i) => [cat.names[i], reduce(pos)]));
+  // without a group, the one group's cells are the categories
+  if (!ser && totals.size) groups.set('', new Map(totals));
   if (showAs === 'percent-of-total') {
     const pct = (v: number, grand: number) => (grand ? (v / grand) * 100 : 0);
     const grand = [...groups.values()].reduce((a, m) => a + [...m.values()].reduce((b, v) => b + v, 0), 0);
@@ -280,7 +312,7 @@ export function pivot(frame: Frame, x: Key, y: string | MeasureFn, group?: Key, 
     const catGrand = [...totals.values()].reduce((a, v) => a + v, 0);
     for (const [c, v] of totals) totals.set(c, pct(v, catGrand));
   }
-  return { cats: [...catVals.keys()], totals, groups, any };
+  return { cats: cat.names, totals, groups, any };
 }
 
 /** Keys sorted in place: dates oldest first, a field with a sort-by column in its order, else the data's order. */

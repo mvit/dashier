@@ -55,21 +55,15 @@ for t, s in src.items():
     except Exception as e:
         F(f'{t}: payload is not gzip+base64 ({e})')
         continue
-    if s.get('format') not in ('csv', 'csv-columns', 'json'):
-        F(f"{t}: format {s.get('format')!r} (csv-columns, csv or json)")
-    elif s.get('format') != 'csv-columns':
-        W(f"{t}: stored as rows ({s['format']}, an older format): it loads, and Dashier saves it as csv-columns; build_report.py writes columns")
-    if s.get('format') == 'json':
-        rows = json.loads(text)
-        rows = rows if isinstance(rows, list) else []
-    else:
-        lines = [r for r in csv.reader(io.StringIO(text)) if r]
-        if s.get('format') == 'csv-columns':  # a line per column: its name, then its values
-            lines = [list(r) for r in itertools.zip_longest(*lines, fillvalue='')]
-        header = lines[0] if lines else []
-        rows = [dict(zip(header, r)) for r in lines[1:]]
-        if header != names:
-            (F if set(header) != set(names) else W)(f'{t}: structure {names} does not match the CSV header {header}')
+    if s.get('format') != 'csv-columns':
+        F(f"{t}: format {s.get('format')!r}: tables are stored as csv-columns (build_report.py writes them)")
+        continue
+    # a line per column: its name, then its values
+    lines = [list(r) for r in itertools.zip_longest(*(r for r in csv.reader(io.StringIO(text)) if r), fillvalue='')]
+    header = lines[0] if lines else []
+    rows = [dict(zip(header, r)) for r in lines[1:]]
+    if header != names:
+        (F if set(header) != set(names) else W)(f'{t}: structure {names} does not match the stored columns {header}')
     data[t] = rows
     for n, ty in types.items():
         vals = [str(r.get(n) if r.get(n) is not None else '').strip() for r in rows]

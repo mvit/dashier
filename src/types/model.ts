@@ -11,15 +11,16 @@ export interface ColumnSchema {
   sortBy?: string;
 }
 
+/** A table's text: CSV with a header row or JSON rows (data being added), or CSV with a line per column (as stored). */
 export type DataSourceFormat = 'csv' | 'csv-columns' | 'json';
 export type DataSourceEncoding = 'gzip+base64';
 
 export interface DashDataSource {
-  format: DataSourceFormat;
+  format: 'csv-columns';
   encoding: DataSourceEncoding;
   /** LLM-facing manifest: describes the payload's columns so it needn't be decoded for simple visuals. */
   structure: ColumnSchema[];
-  /** gzip+base64 of the text: CSV with a header row, CSV with a line per column (its name, then its values), or JSON. */
+  /** gzip+base64 of the table as CSV with a line per column: its name, then its values. */
   payload: string;
 }
 

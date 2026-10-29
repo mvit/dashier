@@ -16,7 +16,7 @@ MIT licensed. Free.
 | `dist/dashier.html` | The built editor, opening on its tutorial: the one file you share |
 | `skill/dashier-report/` | The LLM skill: `SKILL.md` plus `get_dashier.py` (downloads the current editor from the site), `build_report.py` (writes a document into a Dashier file) and `validate_dashier.py` (checks it) |
 | `site/` | The landing page, with the editor, the sample report and the skill as a zip. Every push to `main` rebuilds the editor and the zip into it and publishes it to https://mvit.github.io/dashier/ (`.github/workflows/pages.yml`) |
-| `tests/`, `test-*.cjs`, `test-unit.mjs` | Unit tests, checks on the built file and browser tests |
+| `tests/` | Unit tests, checks on the built file, browser tests (Puppeteer) and the skill scripts' tests |
 
 ## Use
 
@@ -28,11 +28,11 @@ npm test           # unit tests (aggregation, charts, dates, filters, joins, Mar
 npm run unit       # just the unit tests (a fraction of a second)
 npm run upgrade -- report.dashier.html   # give a saved report the current build (keeps its document)
 npm run e2e        # drives it in headless Chrome/Edge (edit, filters, data dialogs, save → reload, encryption)
-npm run phone      # the sample report at 390×844, 360×800 and 844×390 (Playwright): layout and touch checks, screenshots in test-results/phone/
+npm run phone      # the sample report at 390×844, 360×800 and 844×390: layout and touch checks, screenshots in test-results/phone/
 python3 tests/test_validator.py   # the skill's build_report.py and validate_dashier.py (after npm run build)
 ```
 
-`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 113 KB now. The guide and the tutorial document don't count toward it.
+`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 114 KB now. The guide and the tutorial document don't count toward it.
 
 The file opens in the editor. **▶ Preview** hides the chrome (Esc to return).
 

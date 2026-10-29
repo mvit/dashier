@@ -731,7 +731,7 @@ Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`,
 
 - Write every `<` inside the JSON as `\u003c` (`build_report.py` does it). Never touch the packed app.
 - Tables are stored as columns (`"format": "csv-columns"`: one CSV line per column, its name then its values;
-  older files' `csv` (header row) and `json` tables still load, and Dashier saves them as columns). Edit the CSVs
+  the only format a file's tables are in). Edit the CSVs
   and rerun `build_report.py`; to read a payload in Python: `rows = list(zip(*csv.reader(io.StringIO(gzip.decompress(base64.b64decode(p)).decode()))))`
   (header first), and back: `csv.writer(f).writerows(zip(*rows))` on an `io.StringIO` `f`, then
   `base64.b64encode(gzip.compress(f.getvalue().encode())).decode()`.

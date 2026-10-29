@@ -5,7 +5,7 @@
   "theme": { "mode": "light" },
   "sources": {
     "regional_metrics": {
-      "format": "csv",
+      "format": "csv-columns",
       "encoding": "gzip+base64",
       "structure": [
         { "name": "region", "type": "string" },
@@ -13,16 +13,16 @@
         { "name": "revenue", "type": "float" },
         { "name": "active_users", "type": "uint" }
       ],
-      "payload": "H4sIAAAAAAAACmWQsW7EIBBEe3/FfcAKzS4LhvKKdFGUfEGELJJQxL5g+74/4uTCOjrQm53dmZq/yzLT357qlivVfM/znilNW7nnz33NdR3elrr9XK6/uZYp0QcTizrAOBCrAM8CIVYrgAGIvesFltiHCBhxxO3xLFDi6BQwASTCwPCy1+WW2/IY9LBmOQFpfwuY0RFbPRFLLDEcM+48o8Qa/JFkDMBwXUu6vKepfJWpLQtNbwQUeyrEePTQfMV33BLbdqLRVgN3XIm9HFkErabXtJX5XLS27I1r7LGQPkp0IBd6bMn5w92PPVbyemQbI/APlwwpGAgCAAA="
+      "payload": "H4sIAAAAAAAC/5VOMVLEMAzs84p7gIaxFclxyivoGIa8gPFkBLggASe59yP5PFQUoZF3td7VFnnP6wLPa9k/LtdPKXlO/2CPR1m/5O/nuuV0eUlzfsvzWfKU9rz8pp9m3feRyi4FJg8TwtTDRGdwV+QmyyHgkdi5B3bgqUdFTlGIoyJk8COTouhgjNREj72iQUUcY9tRDPeQyJaBunI118Te244sF1sIoW+gXlIjhyYFuid0ad7zTV6PTcqmF7AWY5vmAbQIa1NPkE2ueNBSYM20YKgm+4jOrGRONi0MOgal3Q+2TwyVCQIAAA=="
     },
     "region_targets": {
-      "format": "csv",
+      "format": "csv-columns",
       "encoding": "gzip+base64",
       "structure": [
         { "name": "area", "type": "string" },
         { "name": "target_revenue", "type": "float" }
       ],
-      "payload": "H4sIAAAAAAAC/0ssSk3UKUksSk8tiS9KLUvNK03l8ssvKslQcMxNLcpMTtSxMAABLtfSovyCVB0zCM+xODNRISAxOTMtM1nH1BQs5pNYkpkH12YEEQQAspU+d2AAAAA="
+      "payload": "H4sIAAAAAAAC/0ssSk3U8csvKslQcMxNLcpMTtRxLS3KL0jVcSzOTFQISEzOTMtM1vFJLMnMg6ngKkksSk8tiS9KLUvNK03VsTAAAR0zCGVqCqaMwBQXAKJWv71gAAAA"
     }
   },
   "relationships": [

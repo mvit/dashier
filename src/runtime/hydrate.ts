@@ -197,9 +197,9 @@ export type LoadStep = { step: 'unpack' } | { step: 'read'; share: number; rows:
 export const textToColumnsAsync = async (text: string, format: DataSourceFormat, structure: ColumnSchema[], progress: (s: LoadStep) => void): Promise<ColumnTable> =>
   format === 'json' ? columnsFromRows(parseJSON(text), structure) : columnsFromCSVAsync(text, structure, (share, rows) => progress({ step: 'read', share, rows }), format === 'csv-columns');
 
-/** Decompresses and parses one source into columns, with its declared column types. */
+/** Decompresses and parses one source (stored as columns) into columns, with its declared column types. */
 export async function hydrateSource(source: DashDataSource, progress: (s: LoadStep) => void = () => {}): Promise<ColumnTable> {
   progress({ step: 'unpack' });
-  return textToColumnsAsync(await payloadText(source.payload), source.format, source.structure, progress);
+  return textToColumnsAsync(await payloadText(source.payload), 'csv-columns', source.structure, progress);
 }
 

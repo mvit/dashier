@@ -1,5 +1,6 @@
 import { Component, For, Index, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
+import { Modal } from './Modal';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
 import { formatValue, summaryLabel, SUMMARY_NAMES, withUnits } from '../runtime/charts';
 import { OPS, compileMeasure, measureError, measureFormat, wheres } from '../runtime/measures';
@@ -107,127 +108,114 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
   );
 
   return (
-    <div class="modal-backdrop" onClick={props.onClose}>
-      <div class="modal-dialog d-measure-dialog" onClick={(e) => e.stopPropagation()}>
-        <div class="modal-header">
-          <div>
-            <h3>{existing ? 'Edit measure' : 'New measure'}</h3>
-            <p class="modal-subtitle">On {props.table}</p>
-          </div>
-          <button class="btn-close-modal" title="Close (Esc)" onClick={props.onClose}>×</button>
+    <Modal class="d-measure-dialog" title={existing ? 'Edit measure' : 'New measure'} subtitle={`On ${props.table}`} onClose={props.onClose}>
+      <div class="modal-body d-measure-body">
+        <label class="d-mfield">
+          Name
+          <input class="d-input d-measure-name" value={name()} placeholder="e.g. Revenue per user" spellcheck={false} onInput={(e) => setName(e.currentTarget.value)} />
+        </label>
+
+        <div class="d-seg">
+          <For each={[['summarize', 'Summarize a field'], ['calculate', 'Calculate']] as const}>
+            {([m, label]) => <button class={mode() === m ? 'on' : ''} onClick={() => setMode(m)}>{label}</button>}
+          </For>
         </div>
 
-        <div class="modal-body d-measure-body">
-          <label class="d-mfield">
-            <span>Name</span>
-            <input class="d-input d-measure-name" value={name()} placeholder="e.g. Revenue per user" spellcheck={false} onInput={(e) => setName(e.currentTarget.value)} />
-          </label>
-
-          <div class="d-seg">
-            <For each={[['summarize', 'Summarize a field'], ['calculate', 'Calculate']] as const}>
-              {([m, label]) => <button class={mode() === m ? 'on' : ''} onClick={() => setMode(m)}>{label}</button>}
-            </For>
-          </div>
-
-          <Show when={mode() === 'summarize'}>
-            <div class="d-mrow">
-              <select class="d-well-select d-measure-agg" value={aggregate()} onChange={(e) => setAggregate(e.currentTarget.value as AggregationMethod)}>
-                <For each={SUMMARIES}>{(m) => <option value={m}>{m === 'count' ? 'Count of rows' : SUMMARY_NAMES[m]}</option>}</For>
+        <Show when={mode() === 'summarize'}>
+          <div class="d-mrow">
+            <select class="d-well-select d-measure-agg" value={aggregate()} onChange={(e) => setAggregate(e.currentTarget.value as AggregationMethod)}>
+              <For each={SUMMARIES}>{(m) => <option value={m}>{m === 'count' ? 'Count of rows' : SUMMARY_NAMES[m]}</option>}</For>
+            </select>
+            <Show when={aggregate() !== 'count'}>
+              of
+              <select class="d-well-select d-measure-field" value={field()} onChange={(e) => setField(e.currentTarget.value)}>
+                <option value="">Choose a field…</option>
+                {fieldOptions(() => (aggregate() === 'distinct' ? fields() : numericFields()))}
               </select>
-              <Show when={aggregate() !== 'count'}>
-                <span>of</span>
-                <select class="d-well-select d-measure-field" value={field()} onChange={(e) => setField(e.currentTarget.value)}>
-                  <option value="">Choose a field…</option>
-                  {fieldOptions(() => (aggregate() === 'distinct' ? fields() : numericFields()))}
-                </select>
-              </Show>
-            </div>
-            <Index each={conds()}>
-              {(c, i) => (
-                <>
-                  <div class="d-mrow">
-                    <span>{i ? 'and where' : 'Only rows where'}</span>
-                    <select
-                      class="d-well-select d-measure-where"
-                      onChange={(e) => {
-                        const [t, f] = e.currentTarget.value.split('\u0000');
-                        // emptied: a later condition goes, the first means all rows again
-                        f || !i ? setCond(i, { table: f ? t : props.table, field: f ?? '', values: [] }) : setConds(cs => cs.filter((_, j) => j !== i));
-                      }}
-                    >
-                      <option value="">{i ? '(remove)' : '(all rows)'}</option>
-                      <For each={[props.table, ...connected()]}>
-                        {(t) => (
-                          <optgroup label={t === props.table ? props.table : `${t} (connected)`}>
-                            <For each={store.fieldsOf(t)}>{(col) => <option value={`${t}\u0000${col.name}`} selected={c().table === t && c().field === col.name}>{col.name}</option>}</For>
-                          </optgroup>
-                        )}
-                      </For>
-                    </select>
-                    <Show when={c().field}>
-                      <span>is one of</span>
-                    </Show>
-                  </div>
-                  <Show when={c().field}>
-                    <div class="d-measure-values">
-                      <For each={store.distinct(c().table, c().field).slice(0, 500)}>
-                        {(v) => (
-                          <label class="d-checkbox-label">
-                            <input type="checkbox" checked={c().values.includes(v)} onChange={(e) => setCond(i, { values: e.currentTarget.checked ? [...c().values, v] : c().values.filter(x => x !== v) })} />
-                            <span>{v}</span>
-                          </label>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </>
-              )}
-            </Index>
-            <Show when={conds().at(-1)?.field}>
-              <button class="d-link-btn d-measure-and" onClick={() => setConds([...conds(), { table: props.table, field: '', values: [] }])}>+ and where…</button>
             </Show>
-          </Show>
-
-          <Show when={mode() === 'calculate'}>
-            <div class="d-mrow d-mcalc">
-              {operandPicker(a, setA)}
-              <select class="d-well-select d-measure-op" value={op()} onChange={(e) => setOp(e.currentTarget.value as MeasureOp)}>
-                <For each={OPS}>{([v, symbol, words]) => <option value={v} title={words}>{symbol}</option>}</For>
-              </select>
-              {operandPicker(b, setB)}
-            </div>
-          </Show>
-
-          <label class="d-mfield">
-            <span>Format</span>
-            <select class="d-well-select" value={format()} onChange={(e) => setFormat(e.currentTarget.value as ValueFormat | '')}>
-              <For each={FORMAT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
-            </select>
-          </label>
-          <label class="d-mfield">
-            <span>Display units</span>
-            <select class="d-well-select" value={units()} onChange={(e) => setUnits(e.currentTarget.value as Units | '')}>
-              <For each={UNIT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
-            </select>
-          </label>
-
-          <div class={`d-measure-preview ${problem() ? 'muted' : ''}`}>
-            {problem() && name().trim() ? problem() : preview() != null ? <>On all rows of {props.table}: <b>{preview()}</b></> : 'Fill in the measure to see its value.'}
           </div>
-          <Show when={error()}>
-            <div class="d-form-error">{error()}</div>
+          <Index each={conds()}>
+            {(c, i) => (
+              <>
+                <div class="d-mrow">
+                  {i ? 'and where' : 'Only rows where'}
+                  <select
+                    class="d-well-select d-measure-where"
+                    onChange={(e) => {
+                      const [t, f] = e.currentTarget.value.split('\u0000');
+                      // emptied: a later condition goes, the first means all rows again
+                      f || !i ? setCond(i, { table: f ? t : props.table, field: f ?? '', values: [] }) : setConds(cs => cs.filter((_, j) => j !== i));
+                    }}
+                  >
+                    <option value="">{i ? '(remove)' : '(all rows)'}</option>
+                    <For each={[props.table, ...connected()]}>
+                      {(t) => (
+                        <optgroup label={t === props.table ? props.table : `${t} (connected)`}>
+                          <For each={store.fieldsOf(t)}>{(col) => <option value={`${t}\u0000${col.name}`} selected={c().table === t && c().field === col.name}>{col.name}</option>}</For>
+                        </optgroup>
+                      )}
+                    </For>
+                  </select>
+                  <Show when={c().field}>is one of</Show>
+                </div>
+                <Show when={c().field}>
+                  <div class="d-measure-values">
+                    <For each={store.distinct(c().table, c().field).slice(0, 500)}>
+                      {(v) => (
+                        <label class="d-checkbox-label">
+                          <input type="checkbox" checked={c().values.includes(v)} onChange={(e) => setCond(i, { values: e.currentTarget.checked ? [...c().values, v] : c().values.filter(x => x !== v) })} />
+                          {v}
+                        </label>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </>
+            )}
+          </Index>
+          <Show when={conds().at(-1)?.field}>
+            <button class="d-link-btn d-measure-and" onClick={() => setConds([...conds(), { table: props.table, field: '', values: [] }])}>+ and where…</button>
           </Show>
-        </div>
+        </Show>
 
-        <div class="modal-footer">
-          <Show when={existing}>
-            <button class="btn-secondary d-measure-delete" onClick={remove}>Delete</button>
-          </Show>
-          <span style={{ flex: 1 }} />
-          <button class="btn-secondary" onClick={props.onClose}>Cancel</button>
-          <button class="btn-primary" disabled={!!problem()} onClick={() => done(store.saveMeasure(draft(), props.name))}>Save</button>
+        <Show when={mode() === 'calculate'}>
+          <div class="d-mrow d-mcalc">
+            {operandPicker(a, setA)}
+            <select class="d-well-select d-measure-op" value={op()} onChange={(e) => setOp(e.currentTarget.value as MeasureOp)}>
+              <For each={OPS}>{([v, symbol, words]) => <option value={v} title={words}>{symbol}</option>}</For>
+            </select>
+            {operandPicker(b, setB)}
+          </div>
+        </Show>
+
+        <label class="d-mfield">
+          Format
+          <select class="d-well-select" value={format()} onChange={(e) => setFormat(e.currentTarget.value as ValueFormat | '')}>
+            <For each={FORMAT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
+          </select>
+        </label>
+        <label class="d-mfield">
+          Display units
+          <select class="d-well-select" value={units()} onChange={(e) => setUnits(e.currentTarget.value as Units | '')}>
+            <For each={UNIT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
+          </select>
+        </label>
+
+        <div class={`d-measure-preview ${problem() ? 'muted' : ''}`}>
+          {problem() && name().trim() ? problem() : preview() != null ? <>On all rows of {props.table}: <b>{preview()}</b></> : 'Fill in the measure to see its value.'}
         </div>
+        <Show when={error()}>
+          <div class="d-form-error">{error()}</div>
+        </Show>
       </div>
-    </div>
+
+      <div class="modal-footer">
+        <Show when={existing}>
+          <button class="btn-secondary d-measure-delete" onClick={remove}>Delete</button>
+        </Show>
+        <button class="btn-secondary" onClick={props.onClose}>Cancel</button>
+        <button class="btn-primary" disabled={!!problem()} onClick={() => done(store.saveMeasure(draft(), props.name))}>Save</button>
+      </div>
+    </Modal>
   );
 };

@@ -12,6 +12,7 @@ import { Logo } from './components/icons';
 import { ContextMenuHost } from './components/ContextMenu';
 import { AddDataDialog } from './components/AddDataDialog';
 import { EditDataDialog } from './components/EditDataDialog';
+import { Modal } from './components/Modal';
 
 /** The project's home, shown in About. */
 const GITHUB = 'https://github.com/mvit/dashier';
@@ -141,30 +142,28 @@ export const App: Component = () => {
       </Show>
       {/* About, and the same dialog warning that Export JSON from an encrypted report writes its data readable */}
       <Show when={dialog()?.about || dialog()?.exportJSON}>
-        <div class="modal-backdrop" onClick={close}>
-          <div class="modal-dialog d-about" onClick={(e) => e.stopPropagation()}>
-            <Logo size={48} />
-            <Show
-              when={dialog()?.about}
-              fallback={
-                <>
-                  <h3>Export readable data?</h3>
-                  <p>This report is encrypted, but Export JSON writes every table readable, without the password: anyone with the JSON can read the data.</p>
-                  <div class="d-row">
-                    <button class="btn-secondary" onClick={close}>Cancel</button>
-                    <button class="btn-primary" onClick={() => (close(), store.exportJSON())}>Export JSON</button>
-                  </div>
-                </>
-              }
-            >
-              <h3>Dashier</h3>
-              <p>A dashboard in one HTML file: the report and its data, for people and LLMs to edit.</p>
-              <p>Made by mvit and Opus 5.5</p>
-              <p>{GITHUB ? <a href={GITHUB} target="_blank" rel="noopener">GitHub</a> : 'GitHub: coming soon'}</p>
-              <button class="btn-primary" onClick={close}>Close</button>
-            </Show>
-          </div>
-        </div>
+        <Modal class="d-about" onClose={close}>
+          <Logo size={48} />
+          <Show
+            when={dialog()?.about}
+            fallback={
+              <>
+                <h3>Export readable data?</h3>
+                <p>This report is encrypted, but Export JSON writes every table readable, without the password: anyone with the JSON can read the data.</p>
+                <div class="d-row">
+                  <button class="btn-secondary" onClick={close}>Cancel</button>
+                  <button class="btn-primary" onClick={() => (close(), store.exportJSON())}>Export JSON</button>
+                </div>
+              </>
+            }
+          >
+            <h3>Dashier</h3>
+            <p>A dashboard in one HTML file: the report and its data, for people and LLMs to edit.</p>
+            <p>Made by mvit and Opus 5.5</p>
+            <p>{GITHUB ? <a href={GITHUB} target="_blank" rel="noopener">GitHub</a> : 'GitHub: coming soon'}</p>
+            <button class="btn-primary" onClick={close}>Close</button>
+          </Show>
+        </Modal>
       </Show>
       <Show when={dialog()?.measure}>{(m) => <MeasureDialog table={m().table} name={m().name} field={m().field} onClose={close} />}</Show>
       <Show when={dialog()?.replace}>

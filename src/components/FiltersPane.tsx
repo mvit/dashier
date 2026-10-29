@@ -83,7 +83,7 @@ const FilterCard: Component<{ scope: FilterScope; index: number; filter: DashFil
           {(v) => (
             <label class="d-checkbox-label">
               <input type="checkbox" checked={selected().includes(v)} onChange={() => toggle(v)} />
-              <span>{label(v)}</span>
+              {label(v)}
             </label>
           )}
         </For>

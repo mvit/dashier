@@ -151,32 +151,12 @@ function createDashboardStore() {
         setStatus(s.step === 'unpack' ? `Opening ${id}…` : `Reading ${id}: ${s.rows.toLocaleString()} rows (${Math.round(s.share * 100)}%)`)
       );
       setDataStore(prev => ({ ...prev, [id]: table }));
-      columnize(id);
     } catch (err) {
       console.error(`[dashier] Couldn't read table "${id}":`, err);
     } finally {
       setStatus('');
     }
   }
-
-  /**
-   * Older files store a table as rows (CSV or JSON): it's rewritten as columns in the background after loading, and
-   * saving and exporting wait for it (`columnar`), so only columns are ever written. A table changed meanwhile is
-   * rewritten as it is then.
-   */
-  async function columnize(id: string) {
-    try {
-      for (let s; (s = doc.sources[id]) && s.format !== 'csv-columns'; ) {
-        const { format, payload } = s;
-        const columns = await holdText(await columnsText(await payloadText(payload), format));
-        if (doc.sources[id]?.payload === payload) setDoc('sources', id, { payload: columns, format: 'csv-columns' });
-      }
-    } catch (err) {
-      // data that can't be read is saved as it came: one bad table never blocks a save
-      console.warn(`[dashier] Kept table "${id}" as it was stored:`, err);
-    }
-  }
-  const columnar = () => Promise.all(Object.keys(doc.sources).map(columnize));
 
   async function hydrate() {
     // tables an undo took away (or renamed) leave no data behind
@@ -1231,10 +1211,9 @@ function createDashboardStore() {
     if (to === from) return null;
     if (src.structure.some(c => c.name === to)) return `"${to}" already exists in ${sourceId}.`;
 
-    // stored as columns from then on (any format reads)
-    const payload = await holdText(await columnsText(await payloadText(src.payload), src.format, (n) => (n === from ? to : n)));
+    const payload = await holdText(await columnsText(await payloadText(src.payload), 'csv-columns', (n) => (n === from ? to : n)));
     pushHistory();
-    setDoc('sources', sourceId, { payload, format: 'csv-columns' });
+    setDoc('sources', sourceId, 'payload', payload);
     setDoc('sources', sourceId, 'structure', i, 'name', to);
     // a column ordered by the renamed one follows it
     src.structure.forEach((c, j) => c.sortBy === from && setDoc('sources', sourceId, 'structure', j, 'sortBy', to));
@@ -1338,9 +1317,8 @@ function createDashboardStore() {
     setIsDirty(true);
   }
 
-  /** Runs `use` on the document as it is written out (every table as columns): with a password, every payload sealed into `encryption`. */
+  /** Runs `use` on the document as it is written out: with a password, every payload sealed into `encryption`. */
   async function sealed<T>(use: (d: DashDocument) => Promise<T>): Promise<T> {
-    await columnar();
     if (!lock) return use(doc);
     const ids = Object.keys(doc.sources);
     const [meta, cipher] = await seal(lock, await Promise.all(ids.map(async id => [id, await blobOf(doc.sources[id].payload)] as [string, Blob])));
@@ -1472,7 +1450,7 @@ function createDashboardStore() {
     encrypted,
     setPassword,
     // JSON is the hand-over format (to people and LLMs): always the readable data, never sealed
-    exportJSON: async () => (await columnar(), exportDocumentJSON(doc)),
+    exportJSON: () => exportDocumentJSON(doc),
     importDoc
   };
 }
