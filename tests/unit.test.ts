@@ -4,7 +4,7 @@ import { aggregate, buildChart, chartKind, comparison, withUnits, formatCompact,
 import { compareText, filterTest, keyText, shiftFilters, sortOrder, sortText } from '../src/runtime/data';
 import { distinctOf, filterFrame, frameRows, joinFrame, reader, rowsFrame, subset, tableFrame } from '../src/runtime/frames';
 import { datePartKey, datePartLabel, inRange, lastRange, shiftKey, shiftRange, toISODate } from '../src/runtime/dates';
-import { CONVERT, applyTypes, csvHead, inferStructure, parseCSV, parseJSON, renameColumnInText } from '../src/runtime/hydrate';
+import { CONVERT, applyTypes, columnsText, csvReader, csvHead, inferStructure, parseCSV, parseJSON, textToColumnsAsync } from '../src/runtime/hydrate';
 import { blobOf, decompressPayload, expandPayloads, hold, holdBase64, holdText, isHeld, payloadSize, payloadText } from '../src/runtime/payloads';
 import { deriveLock, seal, unseal } from '../src/runtime/crypt';
 import { parseMarkdown } from '../src/runtime/markdown';
@@ -708,7 +708,7 @@ test('JSON: plain values, nested values and wrapped lists all become rows', () =
   assert.deepEqual(parseJSON('[{"a":{"b":1},"c":[1,2]}]'), [{ a: '{"b":1}', c: '[1,2]' }]);
   assert.deepEqual(parseJSON('{"data":[{"a":1},{"a":2}]}'), [{ a: 1 }, { a: 2 }]);
   assert.deepEqual(parseJSON('{"a":[1,2],"b":[3,4]}'), [{ a: 1, b: 3 }, { a: 2, b: 4 }]);
-  assert.deepEqual(JSON.parse(renameColumnInText('json', '{"data":[{"a":1}]}', 'a', 'z')), [{ z: 1 }]);
+  return columnsText('{"data":[{"a":1,"b":null},{"a":true}]}', 'json', n => (n === 'a' ? 'z' : n)).then(t => assert.equal(t, 'z,1,true\nb,,'));
 });
 
 test('templates: weekday names; Markdown: a link address keeps its * and _', () => {
@@ -786,9 +786,11 @@ test('CSV: repeated headers get their own columns; renaming keeps every header i
   assert.deepEqual(parseCSV('a,b,a\n1,2,3'), [{ a: '1', b: '2', 'a 2': '3' }]);
   const t = await columnsFromCSV('a,b,a\n1,2,3', inferStructure(parseCSV('a,b,a\n1,2,3')));
   assert.deepEqual([get(t, 'a', 0), get(t, 'a 2', 0)], [1, 3]);
-  assert.equal(renameColumnInText('csv', 'region,2023,2024\nNorth,10,20', 'region', 'area'), 'area,2023,2024\nNorth,10,20');
-  assert.equal(renameColumnInText('csv', 'a,b,a\n1,2,3', 'b', 'c'), 'a,c,a 2\n1,2,3');
-  assert.equal(renameColumnInText('csv', '"x\ny",b\n1,2', 'b', 'c'), '"x\ny",c\n1,2');
+  const rename = (n: string) => (n === 'b' ? 'c' : n);
+  assert.equal(await columnsText('region,2023,2024\nNorth,10,20', 'csv', n => (n === 'region' ? 'area' : n)), 'area,North\n2023,10\n2024,20');
+  assert.equal(await columnsText('a,b,a\n1,2,3', 'csv', rename), 'a,1\nc,2\na 2,3');
+  assert.equal(await columnsText('"x\ny",b\n1,2', 'csv', rename), '"x\ny",1\nc,2');
+  assert.equal(await columnsText('"x\ny",1\nb,2', 'csv-columns', rename), '"x\ny",1\nc,2', 'columns rename in place');
 });
 
 test('types: guessed from every sampled row, numbers kept whole, mixed kinds stay text', () => {
@@ -979,4 +981,76 @@ test('encryption: the ciphertext is written out like a payload and read back fro
   assert.deepEqual(Buffer.from(file.encryption.ciphertext, 'base64').toJSON().data, await bytesOf(cipher));
   const opened = await unseal(lock, file.encryption, await blobOf(await holdBase64(file.encryption.ciphertext)));
   assert.equal(await opened[0][1].text(), 'date,revenue\n2024-01-01,5');
+});
+
+test('repro: a quarter pick carried across a relationship (match "key") still matches its dates', () => {
+  const t = filterTest({ field: 'month', datePart: 'quarter', values: ['2024 Q1'], match: 'key' } as any);
+  assert.equal(t('2024-02-01'), true);
+  assert.equal(filterTest({ field: 'month', datePart: 'year', values: ['2024'], match: 'key' } as any)('2024-02-01'), true);
+});
+
+test('buildChart: a combo line keeps its own number format (bars in $, the line in %)', () => {
+  const measure = (ref: string) =>
+    ref === '[Rev]' ? { fn: compileMeasure(ms, 't', 'Revenue')!, name: 'Rev', format: 'currency' } : ref === '[Rate]' ? { fn: () => 0.25, name: 'Rate', format: 'percent' } : null;
+  const spec = buildChart(chart({ chartType: 'combo', mapping: { x: 'region', y: '[Rev]', line: '[Rate]' }, options: { showValues: true } }), rowsFrame(sales), { measure });
+  const svg = drawn(spec);
+  assert.match(svg, />25%</);
+  assert.doesNotMatch(svg, />\$0\.25</);
+  const [, x, y, w] = /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"/.exec(svg)!.map(Number);
+  const tip = spec.tip!({ tagName: 'svg', closest: () => null } as unknown as Element, null as any, { x: x + w / 2, y: y + 1 })!;
+  assert.deepEqual(tip.rows.map(r => r.value), ['$40', '25.0%']);
+});
+
+// --- tables stored as columns ("csv-columns": a line per column, its name then its values) ---------------------
+
+const rowsOf = (t: ColumnTable) => Array.from({ length: t.length }, (_, i) => t.names.map(n => get(t, n, i)));
+
+test('columns: a table stored as columns reads as its CSV does, round trip included', async () => {
+  const csv = 'day,store,amount,note,ok\n2024-01-03,S1,5.5,"a, ""b""",true\n1/4/2024,s2,,"two\nlines",false\n2024-01-05,S1,-3,,';
+  const structure = inferStructure(parseCSV(csv));
+  const cols = await columnsText(csv, 'csv');
+  assert.equal(cols.split('\n')[0], 'day,2024-01-03,1/4/2024,2024-01-05', 'a line per column, values as written');
+  const byRow = await columnsFromCSV(csv, structure);
+  const byCol = await textToColumnsAsync(cols, 'csv-columns', structure, () => {});
+  assert.deepEqual(rowsOf(byCol), rowsOf(byRow));
+  assert.deepEqual(byCol.names, byRow.names);
+  assert.equal(await columnsText(cols, 'csv-columns'), cols, 'columns to columns is unchanged');
+  // Python's zip(*csv.reader(...)) writes the same: a short column is padded blank, an unknown one skipped
+  const t = await textToColumnsAsync('a,1,2,3\nb,x\nzz,9', 'csv-columns', [{ name: 'a', type: 'int' }, { name: 'b', type: 'string' }], () => {});
+  assert.deepEqual([t.length, t.names, rowsOf(t)], [3, ['a', 'b'], [[1, 'x'], [2, ''], [3, '']]]);
+});
+
+test('columns: the old row CSV and JSON payloads still load', async () => {
+  const structure = [{ name: 'a', type: 'int' as const }, { name: 'b', type: 'string' as const }];
+  const csv = await textToColumnsAsync('a,b\n1,x\n2,y', 'csv', structure, () => {});
+  const json = await textToColumnsAsync('[{"a":1,"b":"x"},{"a":2,"b":"y"}]', 'json', structure, () => {});
+  assert.deepEqual(rowsOf(csv), [[1, 'x'], [2, 'y']]);
+  assert.deepEqual(rowsOf(json), rowsOf(csv));
+});
+
+test('columns: a 200,000-row column is read a slice at a time, never in one block', async () => {
+  const n = 200_000;
+  const csv = 'id,v,d\n' + Array.from({ length: n }, (_, i) => `K${i},${i % 97}.5,2024-01-${String((i % 28) + 1).padStart(2, '0')}`).join('\n');
+  const structure = [{ name: 'id', type: 'string' as const }, { name: 'v', type: 'float' as const }, { name: 'd', type: 'datetime' as const }];
+  const cols = await columnsText(csv, 'csv');
+  assert.equal(cols.split('\n').length, 3);
+  const t = await textToColumnsAsync(cols, 'csv-columns', structure, () => {});
+  assert.equal(t.length, n);
+  assert.deepEqual([get(t, 'id', n - 1), get(t, 'v', 1), get(t, 'd', 27)], [`K${n - 1}`, 1.5, '2024-01-28']);
+  // a slice (here as short as can be: 64K characters) stops inside a line, with its values so far already taken
+  let fields = 0, records = 0;
+  const r = csvReader(cols, () => records++, () => fields++);
+  assert.equal(r.read(0), false);
+  assert.ok(fields > 1000 && fields < n && r.share() < 0.1, `${fields} values in the first slice`);
+  while (!r.read(0));
+  assert.equal(fields, 3 * (n + 1));
+  assert.equal(records, 0, 'with onField no record is ever gathered whole');
+});
+
+test('columns: a column of exactly 10,000 cells (name + 9,999 values) gets no extra blank value', async () => {
+  for (const n of [9_998, 9_999, 10_000, 19_999]) {
+    const csv = 'id,v\n' + Array.from({ length: n }, (_, i) => `${i},x`).join('\n');
+    const t = await textToColumnsAsync(await columnsText(csv, 'csv'), 'csv-columns', [{ name: 'id', type: 'int' }, { name: 'v', type: 'string' }], () => {});
+    assert.equal(t.length, n, `${n} rows`);
+  }
 });

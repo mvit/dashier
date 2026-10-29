@@ -22,8 +22,8 @@ Scripts in `scripts/` (run them, don't retype them):
 | Script | Does |
 |---|---|
 | `get_dashier.py [OUT.html]` | downloads the current Dashier editor (default `dashier.html`), the template a new report is built from |
-| `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (the current editor, downloaded, when none is given; a path or URL otherwise); a source written as `{"file": "data/x.csv"}` is packed (gzip+base64) and its `structure` inferred |
-| `validate_dashier.py OUT.html` | checks the model against its data, every field reference, filter and slicer values (a value that matches nothing empties a visual), text box templates and the grid; exit 0 = no FAIL |
+| `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (the current editor, downloaded, when none is given; a path or URL otherwise); a source written as `{"file": "data/x.csv"}` is packed as columns (`csv-columns`, gzip+base64) and its `structure` inferred |
+| `validate_dashier.py OUT.html` | checks the model against its data, every field reference, filter and slicer values (a value that matches nothing empties a visual), text box templates and the grid; exit 0 = no FAIL. `--render` (opt-in, needs Playwright for Python) also opens every page headless and fails visuals that render empty |
 
 ## Rules that are never skipped
 
@@ -730,6 +730,11 @@ Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`,
 ## Gotchas
 
 - Write every `<` inside the JSON as `\u003c` (`build_report.py` does it). Never touch the packed app.
+- Tables are stored as columns (`"format": "csv-columns"`: one CSV line per column, its name then its values;
+  older files' `csv` (header row) and `json` tables still load, and Dashier saves them as columns). Edit the CSVs
+  and rerun `build_report.py`; to read a payload in Python: `rows = list(zip(*csv.reader(io.StringIO(gzip.decompress(base64.b64decode(p)).decode()))))`
+  (header first), and back: `csv.writer(f).writerows(zip(*rows))` on an `io.StringIO` `f`, then
+  `base64.b64encode(gzip.compress(f.getvalue().encode())).decode()`.
 - A measure grouped by a field that doesn't reach its table shows the same value on every bar: check the filter
   direction of the relationships between them.
 - A column typed `float` holding `$1,234` or `12%` loads blank. A day-first date column (`05/01/2024`) is read

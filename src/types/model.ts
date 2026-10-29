@@ -11,7 +11,7 @@ export interface ColumnSchema {
   sortBy?: string;
 }
 
-export type DataSourceFormat = 'csv' | 'json';
+export type DataSourceFormat = 'csv' | 'csv-columns' | 'json';
 export type DataSourceEncoding = 'gzip+base64';
 
 export interface DashDataSource {
@@ -19,7 +19,7 @@ export interface DashDataSource {
   encoding: DataSourceEncoding;
   /** LLM-facing manifest: describes the payload's columns so it needn't be decoded for simple visuals. */
   structure: ColumnSchema[];
-  /** gzip+base64 of the CSV/JSON text. */
+  /** gzip+base64 of the text: CSV with a header row, CSV with a line per column (its name, then its values), or JSON. */
   payload: string;
 }
 

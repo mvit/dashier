@@ -24,7 +24,7 @@ import {
 } from '../types/model';
 import { renameInTemplate, templateVariables } from './template';
 import { aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
-import { hydrateSource, renameColumnInText } from './hydrate';
+import { columnsText, hydrateSource } from './hydrate';
 import { blobOf, hold, holdBase64, holdText, isHeld, payloadText, release } from './payloads';
 import { Lock, deriveLock, seal, unseal } from './crypt';
 import { saveDocument, exportDocumentJSON, readEmbeddedDoc } from './save';
@@ -57,7 +57,8 @@ function createDashboardStore() {
 
   // The editor is always on; preview hides the chrome and shows the sheet as a recipient would see it. A phone (under
   // 640px wide) is always in preview, with the page reflowed into one column (theme.css): it views and filters.
-  const phone = matchMedia('(max-width: 639.98px)');
+  // or a touch screen under 500px tall: a phone on its side
+  const phone = matchMedia('(max-width: 639.98px), (pointer: coarse) and (max-height: 500px)');
   const [preview, setPreviewSignal] = createSignal(hash.includes('preview') || phone.matches);
   // print mode shows every page as it will print; nothing is editable there
   const [printing, setPrintingSignal] = createSignal(false);
@@ -150,12 +151,32 @@ function createDashboardStore() {
         setStatus(s.step === 'unpack' ? `Opening ${id}…` : `Reading ${id}: ${s.rows.toLocaleString()} rows (${Math.round(s.share * 100)}%)`)
       );
       setDataStore(prev => ({ ...prev, [id]: table }));
+      columnize(id);
     } catch (err) {
       console.error(`[dashier] Couldn't read table "${id}":`, err);
     } finally {
       setStatus('');
     }
   }
+
+  /**
+   * Older files store a table as rows (CSV or JSON): it's rewritten as columns in the background after loading, and
+   * saving and exporting wait for it (`columnar`), so only columns are ever written. A table changed meanwhile is
+   * rewritten as it is then.
+   */
+  async function columnize(id: string) {
+    try {
+      for (let s; (s = doc.sources[id]) && s.format !== 'csv-columns'; ) {
+        const { format, payload } = s;
+        const columns = await holdText(await columnsText(await payloadText(payload), format));
+        if (doc.sources[id]?.payload === payload) setDoc('sources', id, { payload: columns, format: 'csv-columns' });
+      }
+    } catch (err) {
+      // data that can't be read is saved as it came: one bad table never blocks a save
+      console.warn(`[dashier] Kept table "${id}" as it was stored:`, err);
+    }
+  }
+  const columnar = () => Promise.all(Object.keys(doc.sources).map(columnize));
 
   async function hydrate() {
     // tables an undo took away (or renamed) leave no data behind
@@ -1198,7 +1219,7 @@ function createDashboardStore() {
   }
 
   /**
-   * Renames a column: the stored header (or JSON key) is rewritten, and every visual, filter and
+   * Renames a column: the stored name is rewritten, and every visual, filter and
    * relationship that used the old name follows. Returns an error message, or null.
    */
   async function renameColumn(sourceId: string, from: string, to: string): Promise<string | null> {
@@ -1210,9 +1231,10 @@ function createDashboardStore() {
     if (to === from) return null;
     if (src.structure.some(c => c.name === to)) return `"${to}" already exists in ${sourceId}.`;
 
-    const payload = await holdText(renameColumnInText(src.format, await payloadText(src.payload), from, to));
+    // stored as columns from then on (any format reads)
+    const payload = await holdText(await columnsText(await payloadText(src.payload), src.format, (n) => (n === from ? to : n)));
     pushHistory();
-    setDoc('sources', sourceId, 'payload', payload);
+    setDoc('sources', sourceId, { payload, format: 'csv-columns' });
     setDoc('sources', sourceId, 'structure', i, 'name', to);
     // a column ordered by the renamed one follows it
     src.structure.forEach((c, j) => c.sortBy === from && setDoc('sources', sourceId, 'structure', j, 'sortBy', to));
@@ -1316,8 +1338,9 @@ function createDashboardStore() {
     setIsDirty(true);
   }
 
-  /** Runs `use` on the document as it is written out: with a password, every payload sealed into `encryption`. */
+  /** Runs `use` on the document as it is written out (every table as columns): with a password, every payload sealed into `encryption`. */
   async function sealed<T>(use: (d: DashDocument) => Promise<T>): Promise<T> {
+    await columnar();
     if (!lock) return use(doc);
     const ids = Object.keys(doc.sources);
     const [meta, cipher] = await seal(lock, await Promise.all(ids.map(async id => [id, await blobOf(doc.sources[id].payload)] as [string, Blob])));
@@ -1347,7 +1370,8 @@ function createDashboardStore() {
     srcVer++;
     setActivePageId(newDoc.pages[0]?.id || '');
     setSelectedElementId(null);
-    hydrate();
+    // an encrypted document (an older JSON export) waits for its password (TopBar)
+    newDoc.encryption || hydrate();
   }
 
   return {
@@ -1447,7 +1471,8 @@ function createDashboardStore() {
     unlock,
     encrypted,
     setPassword,
-    exportJSON: () => sealed(exportDocumentJSON),
+    // JSON is the hand-over format (to people and LLMs): always the readable data, never sealed
+    exportJSON: async () => (await columnar(), exportDocumentJSON(doc)),
     importDoc
   };
 }

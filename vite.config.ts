@@ -3,7 +3,7 @@ import solidPlugin from 'vite-plugin-solid';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
+import { gzipAsync } from '@gfx/zopfli';
 import pack85 from './pack85.cjs';
 
 // Runs the packed app code. Indirect eval keeps it out of the DOM, so the page HTML that
@@ -23,7 +23,7 @@ function packScript(): Plugin {
     name: 'dashier-pack',
     apply: 'build',
     enforce: 'post',
-    closeBundle() {
+    async closeBundle() {
       const dist = path.resolve(__dirname, 'dist');
       const input = path.join(dist, 'index.html');
       if (!fs.existsSync(input)) return;
@@ -38,7 +38,8 @@ function packScript(): Plugin {
       const css = styles[0][1];
 
       const code = `{const s=new CSSStyleSheet;s.replaceSync(${JSON.stringify(css)});document.adoptedStyleSheets=[s]}\n${js}`;
-      const packed = pack85.encode(zlib.gzipSync(code, { level: 9 }));
+      // zopfli: still plain gzip for DecompressionStream, about 4% smaller than zlib -9; costs build time only
+      const packed = pack85.encode(Buffer.from(await gzipAsync(code, { numiterations: 15 })));
       html = html.replace(scripts[0][0], () => '').replace(styles[0][0], () => '');
       html = html.replace('</body>', () => `<script id="dashier-js" type="text/plain">${packed}</script>\n<script>${LOADER}</script>\n</body>`);
 

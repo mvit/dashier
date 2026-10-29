@@ -534,16 +534,16 @@ kbd { margin-left: auto; padding-left: 14px; font: inherit; font-size: 10px; opa
 }
 /* Printing from the browser menu outside print mode, and phones: just the current sheet, unscaled, without the
    editor around it, in a page that scrolls (or prints) as a whole. */
-@media print, (max-width: 639.98px) {
+@media print, (max-width: 639.98px), (pointer: coarse) and (max-height: 500px) {
   html, body, .ed-root { height: auto !important; overflow: visible !important; }
   .ed-root:not(.mode-printing) :is(.ed-topbar, .d-right-panes-strip, .ed-statusbar) { display: none !important; }
   .ed-root:not(.mode-printing) :is(.ed-main, .ed-canvas-area, .d-canvas-workspace, .d-canvas-scroll-container) { display: block; overflow: visible; padding: 0; background: none; }
   .ed-root:not(.mode-printing) .d-canvas-stage { width: auto !important; height: auto !important; margin: 0; }
   .ed-root:not(.mode-printing) .d-canvas-sheet { position: static; transform: none !important; box-shadow: none; border: 0; }
 }
-/* Phones (store.phone in store.ts): the page reflows into one column, to view and filter. KPI cards come first, two to a
+/* Phones, upright or on their side (store.phone in store.ts): the page reflows into one column, to view and filter. KPI cards come first, two to a
    row, then every other visual at full width in reading order (--o, set by Canvas.tsx); slicers move to a drawer. */
-@media (max-width: 639.98px) {
+@media (max-width: 639.98px), (pointer: coarse) and (max-height: 500px) {
   .d-canvas-sheet { width: auto !important; min-height: 0 !important; padding: 12px; }
   .d-canvas-workspace:has(.d-drawer-btn) .d-canvas-sheet { padding-top: 56px; }
   .d-visuals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; gap: 10px; }

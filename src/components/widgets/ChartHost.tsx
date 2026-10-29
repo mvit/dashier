@@ -1,6 +1,6 @@
 import { Component, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import type { ChartSpec } from '../../runtime/charts';
-import { hideTip, showTip } from '../../runtime/tooltip';
+import { hideTip, pinching, showTip } from '../../runtime/tooltip';
 import { observeSize } from '../../runtime/view';
 
 /** Draws a chart's SVG at exactly the space the parent gives it, in the report's font, with its tooltips. */
@@ -28,8 +28,10 @@ export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['t
   });
 
   // Tooltips: the spec maps the pointer (in the SVG's own coordinates, whatever the zoom) to values.
+  // A mouse or pen hovers; a finger taps (a drag pans the page, two fingers pinch: no tooltip then).
   const onMove = (e: PointerEvent) => {
     const svg = host.querySelector('svg');
+    if (pinching()) return hideTip();
     const m = svg?.getScreenCTM();
     if (!svg || !m || !props.tip) return hideTip();
     const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
@@ -39,7 +41,7 @@ export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['t
   onCleanup(hideTip);
 
   return (
-    <div class="d-chart-plot" ref={host} onPointerMove={onMove} onPointerLeave={hideTip}>
+    <div class="d-chart-plot" ref={host} onPointerDown={onMove} onPointerMove={(e) => e.pointerType != 'touch' && onMove(e)} onPointerLeave={(e) => e.pointerType != 'touch' && hideTip()}>
       <Show when={out()?.svg} fallback={<div class={`d-chart-empty ${out()?.error ? 'd-error' : ''}`}>{out()?.error}</div>}>
         <div class="d-chart-svg" innerHTML={out()!.svg} />
       </Show>

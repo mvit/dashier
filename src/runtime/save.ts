@@ -3,6 +3,8 @@ import { expandPayloads } from './payloads';
 
 let pristineHtml = '';
 let activeFileHandle: FileSystemFileHandle | null = null;
+/** When this tab last wrote the file: a later change on disk is someone else's (a rebuild, another tab). */
+let written = 0;
 
 const DOC_SCRIPT = /(<script\s+[^>]*id=["']dashier-doc["'][^>]*>)[\s\S]*?(<\/script>)/i;
 
@@ -36,7 +38,7 @@ export function readEmbeddedDoc(): DashDocument {
  * script block. Payloads are still in-memory references here (see payloads.ts): expandPayloads writes them out.
  */
 function generateSelfContainedHtml(doc: DashDocument): string {
-  const serialized = JSON.stringify(doc, null, 2).replace(/</g, '\\u003c');
+  const serialized = JSON.stringify(doc, null, 1).replace(/</g, '\\u003c');
   const title = doc.title.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const html = (pristineHtml || pageHtml()).replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${title}</title>`);
   return DOC_SCRIPT.test(html)
@@ -59,6 +61,7 @@ async function writeTo(handle: any, content: Blob) {
   const writable = await handle.createWritable();
   await writable.write(content);
   await writable.close();
+  written = (await handle.getFile()).lastModified;
 }
 
 /**
@@ -75,6 +78,8 @@ export async function saveDocument(
 
   if (!options?.forceSaveAs && activeFileHandle) {
     try {
+      if ((await activeFileHandle.getFile()).lastModified > written && !confirm(`${activeFileHandle.name} changed on disk since this tab saved it. Overwrite it?`))
+        return { success: false, mode: 'file-handle', fileName: activeFileHandle.name };
       await writeTo(activeFileHandle, html);
       return { success: true, mode: 'file-handle', fileName: activeFileHandle.name };
     } catch (err) {
@@ -103,5 +108,5 @@ export async function saveDocument(
 }
 
 export async function exportDocumentJSON(doc: DashDocument) {
-  download(new Blob(await expandPayloads(JSON.stringify(doc, null, 2)), { type: 'application/json;charset=utf-8' }), fileName(doc, '.dashier.json'));
+  download(new Blob(await expandPayloads(JSON.stringify(doc, null, 1)), { type: 'application/json;charset=utf-8' }), fileName(doc, '.dashier.json'));
 }

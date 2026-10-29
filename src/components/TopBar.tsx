@@ -54,6 +54,10 @@ export const TopBar: Component<{ onAbout: () => void }> = (props) => {
       <Show when={asking()}>
         <PasswordDialog confirm onSubmit={setPassword} onClose={() => setAsking(false)} />
       </Show>
+      {/* an encrypted JSON just opened (older exports): its password, as when opening the file; Cancel goes back to the report before */}
+      <Show when={store.locked()}>
+        <PasswordDialog onSubmit={async (pw) => ((await store.unlock(pw)) ? void store.hydrate() : 'Wrong password')} onClose={store.undo} />
+      </Show>
 
       <div class="ed-group ed-group-title">
         <button class="ed-logo" title="About Dashier" onClick={props.onAbout}>

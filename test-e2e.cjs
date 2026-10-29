@@ -1,6 +1,7 @@
 // Drives dist/dashier.html (with the tests/e2e-doc.json report) in headless Chrome/Edge: edit interactions, filters, theming, save -> reload.
 // Usage: npm run build && npm run e2e   (set CHROME_PATH to use a specific browser)
 const puppeteer = require('puppeteer-core');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const zlib = require('zlib');
 const os = require('os');
@@ -187,6 +188,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('page filter changes the KPI', before === '$1,816,004' && after === '$489,101', `${before} → ${after}`);
   check('page filter changes the table', (await page.$$eval('.d-table-widget tbody tr', (rs) => rs.length)) === 4);
   check('tables have no search box or paging', !(await page.$('.d-table-widget input, .d-table-widget select, .table-pagination')));
+  const cut = await page.$eval('.d-table-widget tbody td', (td) => {
+    const hover = () => (td.dispatchEvent(new MouseEvent('mouseenter')), td.title);
+    td.style.fontSize = '400px'; // too wide for its column: cut short
+    const long = hover();
+    td.style.fontSize = '';
+    return [long, td.textContent, hover()];
+  });
+  check('a table cell cut short shows its whole text on hover, a cell that fits none', cut[0] === cut[1] && cut[2] === '', JSON.stringify(cut));
   const cards = () => page.$$eval('.card-value', (es) => es.map((e) => e.textContent));
   check('a filter follows a relationship into another table', (await cards())[2] === '$600,000', (await cards()).join(' | '));
 
@@ -1051,9 +1060,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('saved doc keeps the measures', (doc.measures || []).map((m) => m.name).join() === 'EU revenue,Europe share' && doc.measures[1].a.measure === 'EU revenue', JSON.stringify(doc.measures));
     check('saved doc keeps the theme', doc.theme?.background === '#fbf6f0' && !('branding' in doc.theme), JSON.stringify(doc.theme));
     check('saved payload is still gzip+base64', doc.sources.regional_metrics.encoding === 'gzip+base64');
+    check('an older row-CSV table is saved as columns too (reopened below)', doc.sources.regional_metrics.format === 'csv-columns');
     const targets = doc.sources.region_targets;
-    const header = zlib.gunzipSync(Buffer.from(targets.payload, 'base64')).toString().split('\n')[0];
-    check('saved column rename is in the structure and in the stored data', targets.structure[0].name === 'zone' && header === 'zone,target_revenue', header);
+    // a renamed table is stored as columns from then on: a line per column, its name first
+    const unpack = (src) => zlib.gunzipSync(Buffer.from(src.payload, 'base64')).toString().split('\n');
+    const header = unpack(targets).map((l) => l.split(',')[0]).join();
+    check('saved column rename is in the structure and in the stored data (now as columns)', targets.structure[0].name === 'zone' && targets.format === 'csv-columns' && header === 'zone,target_revenue', header);
+    // a table added in the editor is stored as columns too, every value as pasted
+    const lines = doc.sources.daily ? unpack(doc.sources.daily).map((l) => l.split(',')) : [];
+    const rows = daily.trim().split('\n').map((r) => r.split(','));
+    check('a table added in the editor is saved as columns, value for value', doc.sources.daily?.format === 'csv-columns' && lines.length === 3 &&
+      rows.every((r, i) => r.every((v, j) => lines[j][i] === v)), `${doc.sources.daily?.format} ${lines.length}`);
     check('saved relationship follows the rename', doc.relationships?.length === 1 && doc.relationships[0].to.field === 'zone', JSON.stringify(doc.relationships));
     check('saved doc dropped the deleted table', !doc.sources.scratch && !doc.sources.extra);
     const note = doc.pages[0].elements.find((e) => e.type === 'markdown');
@@ -1209,10 +1226,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await (await p.createCDPSession()).send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dir });
       return dir;
     };
-    const download = async (dir) => {
+    const download = async (dir, ext = '.dashier.html') => {
       for (let i = 0; i < 80; i++) {
         await sleep(150);
-        const f = fs.readdirSync(dir).find((n) => n.endsWith('.dashier.html'));
+        const f = fs.readdirSync(dir).find((n) => n.endsWith(ext));
         if (f) return path.join(dir, f);
       }
     };
@@ -1246,6 +1263,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await submit(page, 's3cret!', 's3cret!');
     const sealed = await download(dir);
     check('Encrypt with password… saves the file', !!sealed);
+    check('Save writes the document with one-space indents, as build_report.py does', !!sealed && fs.readFileSync(sealed, 'utf8').includes('id="dashier-doc">\n{\n "format"'));
     const doc = sealed && docOf(sealed);
     const e = doc?.encryption || {};
     const original = JSON.parse(fs.readFileSync('tests/e2e-doc.json', 'utf8')).sources;
@@ -1264,9 +1282,59 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await submit(p3, 'wrong');
       await p3.waitForSelector('.d-form-error');
       check('a wrong password shows "Wrong password", renders nothing and lets you retry', (await p3.$eval('.d-form-error', (e) => e.textContent)) === 'Wrong password' && !(await p3.$('.d-visual-container')));
-      await submit(p3, 's3cret!');
+      // submitted twice in a row (a double click while the key is derived): opened once, the report stays
+      await p3.$eval('.d-password input', (i) => (i.value = 's3cret!'));
+      await p3.$eval('.d-password .btn-primary', (b) => (b.click(), b.click()));
       await p3.waitForSelector('.card-value');
-      check('the right password opens the report with all its data', (await cards(p3)) === plain, await cards(p3));
+      await sleep(1500);
+      check('the right password opens the report with all its data (a double click opens it once)', (await cards(p3)) === plain, await cards(p3));
+      // Export JSON is the hand-over format: plain data even from an encrypted report, valid, and opened with no prompt
+      dir = await saveDir(p3);
+      await share(p3, 'Export JSON');
+      const json = await download(dir, '.dashier.json');
+      const exported = json && JSON.parse(fs.readFileSync(json, 'utf8'));
+      check('Export JSON uses one-space indents too', !!json && fs.readFileSync(json, 'utf8').startsWith('{\n "format"'));
+      check('Export JSON of an encrypted report writes the data readable, with no ciphertext', !!exported && !exported.encryption &&
+        Object.values(exported.sources).every((s) => zlib.gunzipSync(Buffer.from(s.payload, 'base64')).length > 0));
+      if (json) {
+        const html = json.replace(/\.json$/, '.html');
+        execFileSync('python3', ['skill/dashier-report/scripts/build_report.py', 'dist/dashier.html', json, html]);
+        const v = execFileSync('python3', ['skill/dashier-report/scripts/validate_dashier.py', html], { encoding: 'utf8' });
+        check('…which the validator passes', v.includes('RESULT: PASS'), v.split('\n').filter((l) => l.startsWith('FAIL')).join(' | '));
+        // opened into the encrypted report (still unlocked in p3): no prompt, its data, and the password stays set
+        const [chooser] = await Promise.all([p3.waitForFileChooser(), share(p3, 'Open JSON')]);
+        await chooser.accept([json]);
+        await sleep(800);
+        check('Open JSON reads it with no password prompt', !(await p3.$('.d-password')) && (await cards(p3)) === plain, await cards(p3));
+        dir = await saveDir(p3);
+        await share(p3, '^Save');
+        const resaved = await download(dir);
+        check('…and the report keeps its password: the next save is encrypted', !!resaved && !!docOf(resaved).encryption);
+        // an encrypted JSON (an older export: the sealed document) still asks for its password, as the file does
+        const old = json.replace(/\.dashier\.json$/, '.old.json');
+        fs.writeFileSync(old, JSON.stringify(docOf(sealed)));
+        const p5 = await browser.newPage();
+        p5.on('pageerror', (e) => errors.push('open json: ' + e.message));
+        await p5.goto(URL);
+        await p5.waitForSelector('.card-value');
+        const before = await cards(p5);
+        const [chooser2] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Open JSON')]);
+        await chooser2.accept([old]);
+        await p5.waitForSelector('.d-password');
+        await p5.click('.d-password .btn-secondary');
+        await sleep(500);
+        check('Cancel on an encrypted JSON\'s password keeps the report as it was', !(await p5.$('.d-password')) && (await cards(p5)) === before);
+        const [chooser3] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Open JSON')]);
+        await chooser3.accept([old]);
+        await p5.waitForSelector('.d-password');
+        await submit(p5, 'wrong');
+        await p5.waitForSelector('.d-form-error');
+        await submit(p5, 's3cret!');
+        await p5.waitForSelector('.d-password', { hidden: true });
+        await sleep(800);
+        check('Open JSON of an encrypted JSON asks for the password and opens its data', (await cards(p5)) === plain, await cards(p5));
+        await p5.close();
+      }
       dir = await saveDir(p3);
       await share(p3, 'Remove encryption');
       const opened = await download(dir);
@@ -1285,6 +1353,97 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await p4.waitForSelector('.d-form-error');
       check('a tampered file is refused even with the right password', !(await p4.$('.d-visual-container')));
       await p4.close();
+    }
+
+    // saving in place: a file changed on disk since this tab wrote it (a rebuild) is never overwritten unasked
+    {
+      const p6 = await browser.newPage();
+      p6.on('pageerror', (e) => errors.push('in place: ' + e.message));
+      await p6.evaluateOnNewDocument(() => {
+        window.__disk = { t: 1, writes: 0 };
+        window.showSaveFilePicker = async () => ({ name: 'r.dashier.html', getFile: async () => ({ lastModified: __disk.t }), createWritable: async () => ({ write: async () => {}, close: async () => { __disk.writes++; __disk.t++; } }) });
+      });
+      const asked = [];
+      let answer = false;
+      p6.on('dialog', (d) => (asked.push(d.message()), answer ? d.accept() : d.dismiss()));
+      await p6.goto(URL);
+      await p6.waitForSelector('.card-value');
+      const save = async () => { await share(p6, '^Save'); await sleep(400); };
+      const writes = () => p6.evaluate(() => __disk.writes);
+      await save();
+      await save();
+      check('saving in place again writes without asking', (await writes()) === 2 && !asked.length, asked.join());
+      await p6.evaluate(() => (__disk.t = 99)); // rebuilt on disk
+      await save();
+      check('a file changed on disk since asks before it is overwritten (Cancel keeps it)', (await writes()) === 2 && asked.length === 1 && asked[0].includes('changed on disk'), asked.join());
+      answer = true;
+      await save();
+      check('…and OK overwrites it', (await writes()) === 3 && asked.length === 2);
+      await p6.close();
+    }
+
+    // older files store tables as rows (CSV or JSON): they open, and a save writes every table as columns
+    {
+      const old = JSON.parse(fs.readFileSync('tests/e2e-doc.json', 'utf8'));
+      const t = old.sources.region_targets;
+      const [head, ...rows] = zlib.gunzipSync(Buffer.from(t.payload, 'base64')).toString().trim().split('\n').map((l) => l.split(','));
+      Object.assign(t, { format: 'json', payload: zlib.gzipSync(JSON.stringify(rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]]))))).toString('base64') });
+      const oldFile = path.join(path.dirname(FILE), 'old.html');
+      fs.writeFileSync(oldFile, fs.readFileSync(FILE, 'utf8').replace(/(id="dashier-doc">)[\s\S]*?(<\/script>)/, (_, a, b) => a + JSON.stringify(old) + b));
+      // saved or exported straight after opening, while the rewrite to columns is still running (made slow here):
+      // what's written is columns all the same
+      const p8 = await browser.newPage();
+      p8.on('pageerror', (e) => errors.push('save at once: ' + e.message));
+      await p8.evaluateOnNewDocument(() => {
+        delete window.showSaveFilePicker;
+        const C = window.CompressionStream;
+        window.CompressionStream = function (f) {
+          const wait = new TransformStream({ start: () => new Promise((r) => setTimeout(r, 1500)) });
+          return { writable: wait.writable, readable: wait.readable.pipeThrough(new C(f)) };
+        };
+      });
+      await p8.goto('file:///' + oldFile.replace(/\\/g, '/'));
+      await p8.waitForSelector('.card-value');
+      let dir8 = await saveDir(p8);
+      await share(p8, '^Save');
+      const first = await download(dir8);
+      dir8 = await saveDir(p8);
+      await share(p8, 'Export JSON');
+      const exported = await download(dir8, '.dashier.json');
+      const formats = (d) => d && Object.values(d.sources).map((s) => s.format).join();
+      check('a save straight after opening an older file writes every table as columns', formats(first && docOf(first)) === 'csv-columns,csv-columns', formats(first && docOf(first)));
+      check('…and so does Export JSON', formats(exported && JSON.parse(fs.readFileSync(exported, 'utf8'))) === 'csv-columns,csv-columns');
+      await p8.close();
+
+      const p7 = await browser.newPage();
+      p7.on('pageerror', (e) => errors.push('old formats: ' + e.message));
+      await p7.evaluateOnNewDocument(() => { delete window.showSaveFilePicker; });
+      await p7.goto('file:///' + oldFile.replace(/\\/g, '/'));
+      await p7.waitForSelector('.card-value');
+      const before = await cards(p7);
+      check('a file with row-CSV and JSON tables opens with their data', before === plain, before);
+      // a JSON table added in the editor
+      await p7.click('.d-get-data-btn');
+      await p7.click('.d-paste-btn');
+      await p7.type('.modal-dialog textarea', '[{"k":"a","n":1},{"k":"b, c","n":2.5}]');
+      await p7.waitForSelector('.d-getdata .d-grid');
+      await p7.click('.d-getdata-name', { count: 3 });
+      await p7.keyboard.type('pasted');
+      await p7.click('.modal-dialog .btn-primary');
+      await p7.waitForSelector('.modal-dialog', { hidden: true });
+      await sleep(500);
+      const dir = await saveDir(p7);
+      await share(p7, '^Save');
+      const saved = await download(dir);
+      const d = saved && docOf(saved);
+      const lines = (id) => zlib.gunzipSync(Buffer.from(d.sources[id].payload, 'base64')).toString().split('\n');
+      check('…and saves every table as columns (row CSV, JSON, and a JSON paste)', !!d && Object.values(d.sources).every((s) => s.format === 'csv-columns') &&
+        lines('region_targets')[0].startsWith(head[0] + ',' + rows[0][0]) && lines('pasted').join('|') === 'k,a,"b, c"|n,1,2.5', d && lines('pasted').join('|'));
+      await p7.goto('file:///' + saved.replace(/\\/g, '/'));
+      await p7.waitForSelector('.card-value');
+      await sleep(300);
+      check('…which reopen with the same data', (await cards(p7)) === before, await cards(p7));
+      await p7.close();
     }
   }
 

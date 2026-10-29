@@ -1,6 +1,6 @@
 import { Component, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
-import { csvHead, inferStructure, parseCSV, parseJSON, textToColumnsAsync } from '../runtime/hydrate';
+import { columnsText, csvHead, inferStructure, parseCSV, parseJSON, textToColumnsAsync } from '../runtime/hydrate';
 import { holdText } from '../runtime/payloads';
 import { columnsFromRows } from '../runtime/columns';
 import { frameRows, tableFrame } from '../runtime/frames';
@@ -129,13 +129,14 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
       const t = text().trim();
       const total = parsed().total;
       setBusy({ text: 'Packing the data into the file…' });
-      const payload = await holdText(t);
+      // stored as columns (a line each): smaller, and faster to open
+      const payload = await holdText(await columnsText(t, format()));
       const table = await textToColumnsAsync(t, format(), structure(), (s) =>
         s.step === 'read' && setBusy({ text: `Reading rows: ${s.rows.toLocaleString()} of ${total.toLocaleString()}`, share: s.share })
       );
       setBusy({ text: 'Adding the table…', share: 1 });
       await paint();
-      await store.addDataSource(id, { format: format(), encoding: 'gzip+base64', structure: structure(), payload }, table);
+      await store.addDataSource(id, { format: 'csv-columns', encoding: 'gzip+base64', structure: structure(), payload }, table);
       props.onClose();
     } catch (err: any) {
       setError(String(err?.message || err));

@@ -3,13 +3,18 @@
 Checks a Dashier report against the dashier-reports skill: the data model, every field reference, filter and
 slicer values against the data, text box templates, and the grid. Usage: python3 validate_dashier.py report.html   (exit 0 = no FAIL)
 
+Optional: --render opens every page in headless Chromium and fails a visual that renders empty ("No data for these
+fields", a card showing "-"). It needs Playwright for Python (pip install playwright; python3 -m playwright install
+chromium, or CHROME_PATH=<a Chrome or Edge>), so it is opt-in.
+
 FAIL lines are defects (a visual that will be empty or wrong, a model that inflates or drops rows).
 WARN lines are judgment calls: fix them unless the report has a stated reason not to.
 """
-import base64, csv, gzip, io, json, re, sys
+import base64, csv, gzip, io, itertools, json, os, re, sys
 from collections import Counter
 
-html = open(sys.argv[1], encoding='utf-8').read()
+args = [a for a in sys.argv[1:] if a != '--render']
+html = open(args[0], encoding='utf-8').read()
 m = re.search(r'<script type="application/dashier\+json" id="dashier-doc">(.*?)</script>', html, re.S)
 if not m:
     sys.exit('FAIL: no dashier-doc block')
@@ -50,13 +55,19 @@ for t, s in src.items():
     except Exception as e:
         F(f'{t}: payload is not gzip+base64 ({e})')
         continue
+    if s.get('format') not in ('csv', 'csv-columns', 'json'):
+        F(f"{t}: format {s.get('format')!r} (csv-columns, csv or json)")
+    elif s.get('format') != 'csv-columns':
+        W(f"{t}: stored as rows ({s['format']}, an older format): it loads, and Dashier saves it as csv-columns; build_report.py writes columns")
     if s.get('format') == 'json':
         rows = json.loads(text)
         rows = rows if isinstance(rows, list) else []
     else:
-        reader = csv.DictReader(io.StringIO(text))
-        rows = list(reader)
-        header = reader.fieldnames or []
+        lines = [r for r in csv.reader(io.StringIO(text)) if r]
+        if s.get('format') == 'csv-columns':  # a line per column: its name, then its values
+            lines = [list(r) for r in itertools.zip_longest(*lines, fillvalue='')]
+        header = lines[0] if lines else []
+        rows = [dict(zip(header, r)) for r in lines[1:]]
         if header != names:
             (F if set(header) != set(names) else W)(f'{t}: structure {names} does not match the CSV header {header}')
     data[t] = rows
@@ -84,9 +95,14 @@ for t, c in cols.items():
         else:
             W(f'{seen[k]} and {t} have the same shape: one fact with a column that tells them apart (and a dimension for it) is simpler to slice')
     seen[k] = t
-for t, c in cols.items():
-    for n in c:
-        if re.search(r'margin|ratio|_pct$|pct_|percent|growth|(^|_)share($|_)|per_|yoy|_avg$|average', n, re.I):
+# a number column named like a ratio, share, average or growth (whole words: not shopper_id); never keys or labels
+keyed = {(e.get('table'), e.get('field')) for r in rels for e in (r.get('from') or {}, r.get('to') or {})}
+DERIVED = {'margin', 'ratio', 'pct', 'percent', 'growth', 'share', 'per', 'yoy', 'avg', 'average'}
+for t, s_ in src.items():
+    for c in s_.get('structure') or []:
+        n = c['name']
+        if c.get('type') in ('int', 'uint', 'float') and (t, n) not in keyed and not re.search(r'_(id|key|code)$', n, re.I) and \
+                DERIVED & {w.lower() for w in re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?![a-z])', n)}:
             W(f'{t}.{n} looks derived (a ratio, share, average or growth): make it a measure unless it is a source fact')
 
 facts = [t for t in src if t.startswith('fact')]
@@ -103,12 +119,19 @@ def text_of(v, numeric):
     return s
 
 
-def check_values(where, t, field, values):
+def bucket(v, part):
+    """A date as the app buckets it for a date part: 2024, 2024 Q1, 2024-01, 2024-01-31 (picks must match exactly)."""
+    s = str(v if v is not None else '').strip()
+    m = re.match(r'(\d{4})-(\d\d)', s)
+    return s if not m else m[1] if part == 'year' else f'{m[1]} Q{(int(m[2]) + 2) // 3}' if part == 'quarter' else s[:7 if part == 'month' else 10]
+
+
+def check_values(where, t, field, values, part=None):
     """Values that match no row: a filter, slicer pick or measure where on them shows nothing."""
     if t not in data or not values:
         return
-    numeric = next((c.get('type') for c in src[t].get('structure') or [] if c['name'] == field), '') in ('int', 'uint', 'float')
-    have = {text_of(r.get(field), numeric) for r in data[t]}
+    numeric = not part and next((c.get('type') for c in src[t].get('structure') or [] if c['name'] == field), '') in ('int', 'uint', 'float')
+    have = {bucket(r.get(field), part) if part else text_of(r.get(field), numeric) for r in data[t]}
     miss = [v for v in values if text_of(v, numeric) not in have]
     if miss:
         (W if len(miss) < len(values) else F)(f'{where}: {t}.{field} has no {miss[:5]}' + ('' if len(miss) < len(values) else ': it shows nothing'))
@@ -290,8 +313,8 @@ def check_filters(where, fs):
             W(f'{where}: filter on {f.get("field")} has no "table": add it so it filters the right table')
         elif t not in src or f.get('field') not in cols[t]:
             F(f'{where}: filter {t}.{f.get("field")} does not exist')
-        elif not f.get('datePart'):
-            check_values(where, t, f['field'], f.get('values'))
+        else:
+            check_values(where, t, f['field'], f.get('values'), f.get('datePart'))
 
 
 TEMPLATE_FILTERS = {'upper', 'lower', 'title', 'truncate', 'round', 'format', 'date', 'default', 'join', 'first', 'last', 'size', 'length', 'sort', 'reverse'}
@@ -412,8 +435,8 @@ for p in pages:
             f = e.get('field')
             if f and home in cols and f not in cols[home]:
                 F(f'{where}: a slicer reads its own table: {home} has no column {f}')
-            elif f and home in cols and not e.get('datePart'):
-                check_values(where, home, f, (e.get('selection') or {}).get('values'))
+            elif f and home in cols:
+                check_values(where, home, f, (e.get('selection') or {}).get('values'), e.get('datePart'))
             if home in facts and f and any(f in cols[d] for d in dims if d in related.get(home, ())):
                 W(f'{where}: slice on the dimension table, not the fact')
         elif ty == 'markdown':
@@ -472,6 +495,33 @@ if dims and facts and not used_dims:
     W('no visual uses a dimension attribute ("dim_x.field"): group and label by the dimensions')
 if '—' in raw or '–' in raw:
     W('an em or en dash in the text')
+
+
+# --- optional: render every page and fail visuals that come out empty ------------------------------------------
+if '--render' in sys.argv:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit('--render needs Playwright for Python: pip install playwright, then python3 -m playwright install chromium (or set CHROME_PATH)')
+    if doc.get('encryption'):
+        W('--render skipped: the data is encrypted')
+    else:
+        from pathlib import Path
+        url = Path(args[0]).resolve().as_uri()
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or None)
+            for p in pages:
+                page = browser.new_page(viewport={'width': 1600, 'height': 1000})
+                page.goto(f'{url}#preview,{p.get("id")}')
+                page.wait_for_selector('.d-visual-container, .d-chart-empty', timeout=30000)
+                page.wait_for_timeout(1500)  # charts draw at their tile's size
+                for eid, what in page.eval_on_selector_all('.d-visual-container', """els => els.map(e => [e.dataset.id,
+                    [...e.querySelectorAll('.d-chart-empty')].some(n => n.textContent.includes('No data')) ? 'shows "No data for these fields"'
+                    : [...e.querySelectorAll('.card-value')].some(n => n.textContent.trim() === '\u2014') ? 'shows no value (a dash)' : ''])"""):
+                    if what:
+                        F(f'{p.get("title", p.get("id"))} / {eid} renders empty: it {what}')
+                page.close()
+            browser.close()
 
 print(f'tables={len(src)} (facts {len(facts)}, dims {len(dims)}) relationships={len(rels)} measures={len(measures)} pages={len(pages)}')
 for w in warns:

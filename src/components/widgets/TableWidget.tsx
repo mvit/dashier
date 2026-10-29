@@ -5,7 +5,7 @@ import { aggregateValue, pct, summarizeValue, withUnits } from '../../runtime/ch
 import { sortOrder } from '../../runtime/data';
 import { datePartKey, datePartLabel } from '../../runtime/dates';
 import { Frame, frameFields, reader, subset } from '../../runtime/frames';
-import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, gridLook, rangeOf, rowHeight, summaryHeader } from './tableKit';
+import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, fullText, gridLook, rangeOf, rowHeight, summaryHeader } from './tableKit';
 
 type Row = Record<string, any>;
 type Read = (k: number) => unknown;
@@ -195,7 +195,7 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
           <tr class={(virtual.range().start + i()) % 2 ? 'odd' : ''}>
             <For each={columns()}>
               {(c, i) => (
-                <td class={align(c)} style={condStyle(c.cond, row[i()], ranges()[i()])}>
+                <td class={align(c)} style={condStyle(c.cond, row[i()], ranges()[i()])} onMouseEnter={fullText}>
                   {cell(row[i()], c)}
                 </td>
               )}

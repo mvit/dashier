@@ -2,7 +2,7 @@ import { dayFirst, toISODate } from './dates';
 import { NUMBER } from './data';
 import { payloadText } from './payloads';
 import { ColumnTable, columnsFromCSVAsync, columnsFromRows } from './columns';
-import { DashDataSource, ColumnSchema, FieldType } from '../types/model';
+import { DashDataSource, ColumnSchema, DataSourceFormat, FieldType } from '../types/model';
 
 type Row = Record<string, any>;
 type Rows = Row[];
@@ -10,16 +10,19 @@ type Rows = Row[];
 /**
  * RFC 4180 CSV, record by record: `onRecord` gets each record's fields as strings (the first is the header).
  * `read(ms)` works for about that long and returns true once the text is done, so a big file can be read a
- * slice at a time with the page repainting in between; `share()` is how far it has got (0–1).
+ * slice at a time with the page repainting in between; `share()` is how far it has got (0–1). With `onField`,
+ * fields go there one by one (with their place in the record) instead: a record a million fields long (a column,
+ * stored as one line) is never held as a whole, and a slice can end in its middle.
  */
-export function csvReader(text: string, onRecord: (fields: string[]) => void) {
+export function csvReader(text: string, onRecord: (fields: string[]) => void, onField?: (v: string, at: number) => void) {
   const t = text.trim();
-  let i = 0, row: string[] = [], val = '', quoted = false;
+  let i = 0, row: string[] = [], val = '', quoted = false, k = 0;
+  const put = () => (onField ? onField(val.trim(), k++) : row.push(val.trim()), (val = ''));
   const endRow = () => {
-    row.push(val.trim());
-    if (!(row.length === 1 && row[0] === '')) onRecord(row);
+    put();
+    if (!onField && !(row.length === 1 && row[0] === '')) onRecord(row);
     row = [];
-    val = '';
+    k = 0;
   };
   const read = (ms = Infinity) => {
     const until = performance.now() + ms;
@@ -31,7 +34,7 @@ export function csvReader(text: string, onRecord: (fields: string[]) => void) {
           else if (t[i + 1] === '"') (val += '"'), i++;
           else quoted = false;
         } else if (c === '"' && !val.trim()) quoted = true; // a quote opens a field only at its start: 5'10" is text
-        else if (c === ',') row.push(val.trim()), (val = '');
+        else if (c === ',') put();
         else if (c === '\n' || c === '\r') {
           if (c === '\r' && t[i + 1] === '\n') i++;
           endRow();
@@ -40,7 +43,7 @@ export function csvReader(text: string, onRecord: (fields: string[]) => void) {
       if (performance.now() > until) return false;
     }
     // the last record (callers stop reading once it's done)
-    if (val || row.length) endRow();
+    if (val || row.length || k) endRow();
     return true;
   };
   return { read, share: () => (t.length ? Math.min(1, i / t.length) : 1) };
@@ -96,17 +99,37 @@ export function parseCSV(text: string): Rows {
 
 const csvCell = (v: string) => (/[",\r\n]/.test(v) || v !== v.trim() ? `"${v.replace(/"/g, '""')}"` : v);
 
-/** Renames one column in the stored text: only the CSV header line (or the JSON keys) is rewritten. */
-export function renameColumnInText(format: 'csv' | 'json', text: string, from: string, to: string): string {
+/** A slice of work done: the page repaints before the next. */
+const pause = () => new Promise(r => setTimeout(r));
+
+/**
+ * A table's text (CSV, JSON rows or columns) as columns: one CSV line per column, its name then its values, in row
+ * order. Tables added or changed here are stored so (format "csv-columns"): a column's values side by side pack
+ * smaller and read faster. `rename` renames columns. A big CSV is read a slice at a time.
+ */
+export async function columnsText(text: string, format: DataSourceFormat, rename = (n: string) => n): Promise<string> {
+  const done: string[][] = [], cells: string[][] = [];
+  // a column's cells are joined 10,000 at a time: millions of small strings would cost more than the text
+  const put = (i: number, v: unknown) => {
+    const c = (cells[i] ??= []);
+    c.push(csvCell(String(v ?? '')));
+    if (c.length > 9999) (done[i] ??= []).push(c.join(',')), (cells[i] = []);
+  };
   if (format === 'json') {
-    const rename = (o: Record<string, any>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k === from ? to : k, v]));
-    return JSON.stringify(parseJSON(text).map(rename)); // stored as plain rows from then on
+    const rows = parseJSON(text), names = [...new Set(rows.flatMap(Object.keys))];
+    names.forEach((n, i) => put(i, rename(n)));
+    for (const r of rows) names.forEach((n, i) => put(i, r[n]));
+  } else {
+    let header: string[] | null = null, col = -1;
+    const reader = csvReader(
+      text,
+      (r) => (header ? header.forEach((_, i) => put(i, r[i])) : (header = uniqueNames(r)).forEach((n, i) => put(i, rename(n)))),
+      format === 'csv' ? undefined : (v, at) => put(at ? col : ++col, at ? v : rename(v))
+    );
+    while (!reader.read(100)) await pause();
   }
-  const t = text.replace(/^\s+/, '');
-  const end = csvHead(t, 0).head.replace(/\r?\n$/, '').length; // the header line (quoted line breaks belong to it)
-  let header: string[] = [];
-  csvReader(t.slice(0, end), r => (header = uniqueNames(r))).read();
-  return header.map(c => csvCell(c === from ? to : c)).join(',') + t.slice(end);
+  // a column that just filled a chunk has no cells left over: no empty piece, which would read as one more blank value
+  return cells.map((c, i) => [...(done[i] ?? []), ...(c.length ? [c.join(',')] : [])].join(',')).filter(Boolean).join('\n');
 }
 
 /** JSON array of row objects, or a columnar { column: [values] } object. */
@@ -170,9 +193,9 @@ export function inferStructure(rows: Rows): ColumnSchema[] {
 /** Where a load has got to: unpacking the stored data, then reading its rows (share 0–1, rows so far). */
 export type LoadStep = { step: 'unpack' } | { step: 'read'; share: number; rows: number };
 
-/** A table's text into typed columns: CSV straight into columns a slice at a time, reporting progress; JSON via its row objects. */
-export const textToColumnsAsync = async (text: string, format: 'csv' | 'json', structure: ColumnSchema[], progress: (s: LoadStep) => void): Promise<ColumnTable> =>
-  format === 'csv' ? columnsFromCSVAsync(text, structure, (share, rows) => progress({ step: 'read', share, rows })) : columnsFromRows(parseJSON(text), structure);
+/** A table's text into typed columns: CSV (rows or columns) straight into columns a slice at a time, reporting progress; JSON via its row objects. */
+export const textToColumnsAsync = async (text: string, format: DataSourceFormat, structure: ColumnSchema[], progress: (s: LoadStep) => void): Promise<ColumnTable> =>
+  format === 'json' ? columnsFromRows(parseJSON(text), structure) : columnsFromCSVAsync(text, structure, (share, rows) => progress({ step: 'read', share, rows }), format === 'csv-columns');
 
 /** Decompresses and parses one source into columns, with its declared column types. */
 export async function hydrateSource(source: DashDataSource, progress: (s: LoadStep) => void = () => {}): Promise<ColumnTable> {

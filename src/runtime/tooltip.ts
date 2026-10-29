@@ -24,6 +24,15 @@ export function showTip(tip: Tip, x: number, y: number, from: Element) {
   el.style.top = `${y + 14 + height > innerHeight ? Math.max(4, y - height - 10) : y + 14}px`;
 }
 
+/** Touches on the screen now: with two or more (a pinch) there's no tooltip. */
+const touches = new Set<number>();
+/** A tap anywhere hides the tooltip, and so does a scroll after one; a tap on a chart then shows its own (ChartHost). */
+let touched = false;
+addEventListener('pointerdown', e => ((touched = e.pointerType == 'touch') && touches.add(e.pointerId), hideTip()), true);
+for (const t of ['pointerup', 'pointercancel']) addEventListener(t, e => touches.delete((e as PointerEvent).pointerId), true);
+addEventListener('scroll', () => touched && hideTip(), true);
+export const pinching = () => touches.size > 1;
+
 export function hideTip() {
   if (el) el.style.display = 'none';
 }

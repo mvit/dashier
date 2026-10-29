@@ -95,3 +95,9 @@ export const cellText = (v: any, share: unknown, format: string | undefined, pla
  * scrolling (as it would with the browser sizing columns from whatever rows happen to be drawn).
  */
 export const colWidth = (header: string, cells: string[], max: number) => Math.min(Math.max(5, header.length + 2, ...cells.map(s => s.length)), max) + 3;
+
+/** A cell's whole text as its tooltip, when the cell cuts it short (set on hover: only then is it measured). */
+export const fullText = (e: MouseEvent) => {
+  const t = e.currentTarget as HTMLElement;
+  t.title = t.scrollWidth > t.clientWidth ? t.textContent! : '';
+};

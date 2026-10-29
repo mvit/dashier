@@ -10,7 +10,7 @@ export function filterTest(f: DashFilter): (v: unknown) => boolean {
   const text = f.match === 'key' ? keyText : String;
   const values = f.values?.length ? new Set(f.values.map(text)) : null;
   return (v) => {
-    if (values && !values.has(f.datePart ? datePartKey(String(v ?? ''), f.datePart) : text(v))) return false;
+    if (values && !values.has(text(f.datePart ? datePartKey(String(v ?? ''), f.datePart) : v))) return false;
     if (f.min != null || f.max != null) {
       const n = v == null || !String(v).trim() ? NaN : Number(v); // a blank isn't 0
       if (!(n >= (f.min ?? -Infinity) && n <= (f.max ?? Infinity))) return false;

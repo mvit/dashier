@@ -363,7 +363,7 @@ export function valueOf(ctx: ChartContext, ref: string, method: AggregationMetho
 }
 
 /** A pivot's values compared with another's (b's period keys already moved onto a's): b, a − b or the % change. */
-const against = (a: number, b?: number, show?: Compare['show']) => comparison(a, b, show)?.d ?? 0;
+const against = (a: number, b?: number, show?: Compare['show']) => comparison(a, b, show)?.d ?? NaN;
 
 const STAT_NAMES = { average: 'Average', median: 'Median', min: 'Minimum', max: 'Maximum' };
 /** A statistic of a series' values (a reference line's), or null when it has none. */
@@ -403,6 +403,8 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
   const stacked = !!opt.stack && kind !== 'line';
   const percent = opt.stack === 'percent' && kind !== 'combo';
   const fmt: ChartFormat = percent ? 'share' : valueFmt;
+  // a combo's line in its own format: a % change is a percent, a measure keeps its format (the axis stays the bars')
+  const lineFmt: ChartFormat = pct(ls.showAs) ? 'share' : ls.compare && !ls.compare.show ? 'percent' : lv?.format ?? fmt;
   const xPart = el.dateParts?.x;
   const groupPart = el.dateParts?.group;
 
@@ -430,11 +432,11 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
   const valueName = yv?.label ?? '';
   const series = (bars ? groupsOf(bars.groups, ctx.groupDate, group && !groupPart ? ctx.order?.(group) : undefined) : []).map(([name, m]) => ({
     name: group ? datePartLabel(name, groupPart) : valueName,
-    data: run(cats.map(c => m.get(c) || 0), ys.showAs),
+    data: run(cats.map(c => m.get(c) ?? 0), ys.showAs),
     line: kind === 'line' || kind === 'area',
     area: kind === 'area'
   }));
-  if (lineData) series.push({ name: lv!.label, data: run(cats.map(c => lineData.totals.get(c) || 0), ls.showAs), line: true, area: false });
+  if (lineData) series.push({ name: lv!.label, data: run(cats.map(c => lineData.totals.get(c) ?? 0), ls.showAs), line: true, area: false, f: lineFmt } as any);
   const shares = percent
     ? series.map(s => s.data.map((v, i) => {
         const total = series.reduce((a, t) => a + Math.abs(t.data[i]), 0);
@@ -443,7 +445,7 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
     : null;
   const shown = cats.map(c => datePartLabel(c, xPart));
   const drawn = shares ? series.map((s, k) => ({ ...s, data: shares[k] })) : series;
-  const format = (v: number, digits?: number) => formatCompact(v, inUnits(fmt, opt.units), digits);
+  const format = (v: number, digits?: number, f: ChartFormat = fmt) => formatCompact(v, inUnits(f, opt.units), digits);
   // one series of bars can take a color per bar
   const vary = !!opt.varyColors && series.length === 1 && !series[0].line;
   const chart = xyChart({
@@ -482,7 +484,7 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
       if (i < 0) return null;
       // the bar under the pointer marks its series
       const active = target.tagName === 'rect' ? Number(target.closest('[data-s]')?.getAttribute('data-s') ?? -1) : -1;
-      const value = (k: number) => (shares ? `${formatFull(shares[k][i], 'share')} (${formatFull(series[k].data[i], valueFmt)})` : formatFull(series[k].data[i], fmt));
+      const value = (k: number) => (shares ? `${formatFull(shares[k][i], 'share')} (${formatFull(series[k].data[i], valueFmt)})` : formatFull(series[k].data[i], (series[k] as any).f ?? fmt));
       return { title: shown[i], rows: series.map((s, k) => ({ label: s.name, value: value(k), color: seriesColor(k), active: k === active })) };
     }
   };

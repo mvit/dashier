@@ -1,6 +1,6 @@
 # Dashier
 
-Interactive reports in **one HTML file**. The editor is 142 KB: open it in a browser, build a report, **Share ▾ → Save** to write it back in place, and send the file to anyone. They open it in any browser, filter it, and can edit it too. There's no server, no account and no network request; the data travels compressed inside the file.
+Interactive reports in **one HTML file**. The editor is 139 KB: open it in a browser, build a report, **Share ▾ → Save** to write it back in place, and send the file to anyone. They open it in any browser, filter it, and can edit it too. There's no server, no account and no network request; the data travels compressed inside the file.
 
 The whole report (model, measures, pages, theme and data) is one JSON block in the file, so an LLM agent can build or edit it as easily as you can. The [Dashier skill](skill/dashier-report) teaches it how.
 
@@ -28,10 +28,11 @@ npm test           # unit tests (aggregation, charts, dates, filters, joins, Mar
 npm run unit       # just the unit tests (a fraction of a second)
 npm run upgrade -- report.dashier.html   # give a saved report the current build (keeps its document)
 npm run e2e        # drives it in headless Chrome/Edge (edit, filters, data dialogs, save → reload, encryption)
-npm run phone      # the sample report at 390×844 and 360×800 (Playwright): layout checks, screenshots in test-results/phone/
+npm run phone      # the sample report at 390×844, 360×800 and 844×390 (Playwright): layout and touch checks, screenshots in test-results/phone/
+python3 tests/test_validator.py   # the skill's build_report.py and validate_dashier.py (after npm run build)
 ```
 
-`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 117 KB now. The guide and the tutorial document don't count toward it.
+`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 113 KB now. The guide and the tutorial document don't count toward it.
 
 The file opens in the editor. **▶ Preview** hides the chrome (Esc to return).
 

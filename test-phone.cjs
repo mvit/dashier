@@ -1,5 +1,5 @@
-// The phone layout, in headless Chrome/Edge via Playwright: the sample report (with the app from dist/) at 390×844
-// and 360×800, every page checked and screenshotted to test-results/phone/.
+// The phone layout, in headless Chrome/Edge via Playwright: the sample report (with the app from dist/) at 390×844,
+// 360×800 and on its side at 844×390, every page checked and screenshotted to test-results/phone/.
 // Usage: npm run build && npm run phone   (set CHROME_PATH to use a specific browser)
 const { chromium } = require('playwright-core');
 const { execFileSync } = require('child_process');
@@ -23,7 +23,7 @@ const check = (name, ok, extra = '') => {
 
 (async () => {
   const browser = await chromium.launch({ executablePath: require('./tests/browser.cjs') });
-  for (const [width, height] of [[390, 844], [360, 800]]) {
+  for (const [width, height] of [[390, 844], [360, 800], [844, 390]]) {
     const at = `${width}×${height}`;
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     const errors = [];
@@ -73,6 +73,43 @@ const check = (name, ok, extra = '') => {
     check(`${at}: a slicer picked in the drawer filters the page`, !(await page.$('.d-drawer')) && (await values()) !== before, `${before} → ${await values()}`);
     await page.evaluate(() => scrollTo(0, 400));
     check(`${at}: the Filters button stays at the top while scrolling`, ((await button.boundingBox())?.y ?? 99) < 20);
+
+    // tooltips by touch: a tap shows one (and it stays after the finger lifts), two fingers or a tap elsewhere hide it
+    await page.evaluate(() => scrollTo(0, 0));
+    const tip = () => page.evaluate(() => getComputedStyle(document.querySelector('.d-tip') ?? document.body).display === 'block');
+    const plot = page.locator('.d-visual-container[data-type="chart"] .d-chart-plot').first();
+    await plot.scrollIntoViewIfNeeded();
+    const pb = await plot.boundingBox();
+    const [cx, cy] = [pb.x + pb.width / 2, pb.y + pb.height / 2];
+    await page.touchscreen.tap(cx, cy);
+    await page.waitForTimeout(300);
+    check(`${at}: a tap on a chart shows its tooltip, which stays once the finger lifts`, await tip());
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+    await touch('touchStart', [{ x: cx, y: cy, id: 1 }]);
+    await touch('touchStart', [{ x: cx, y: cy, id: 1 }, { x: cx + 40, y: cy + 10, id: 2 }]);
+    await touch('touchMove', [{ x: cx - 10, y: cy, id: 1 }, { x: cx + 60, y: cy + 10, id: 2 }]);
+    check(`${at}: no tooltip while two fingers are down (a pinch)`, !(await tip()));
+    await touch('touchEnd', []);
+    await page.touchscreen.tap(cx, cy);
+    await page.waitForTimeout(200);
+    // the same as a phone sends it (pointer events by touch, then a leave once the finger lifts), deterministically
+    const seq = await page.evaluate(([x, y]) => {
+      const host = document.querySelector('.d-visual-container[data-type="chart"] .d-chart-plot');
+      const at = document.elementFromPoint(x, y);
+      const ev = (type, id, dx = 0, el = at) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x + dx, clientY: y, bubbles: !type.endsWith('leave') }));
+      const shown = () => getComputedStyle(document.querySelector('.d-tip') ?? document.body).display === 'block';
+      ev('pointerdown', 11); ev('pointerup', 11); ev('pointerout', 11); ev('pointerleave', 11, 0, host);
+      const lifted = shown();
+      ev('pointerdown', 12); ev('pointerdown', 13, 30); ev('pointermove', 12, -20); ev('pointermove', 13, 50);
+      const pinch = shown();
+      ev('pointerup', 12); ev('pointerup', 13);
+      return { lifted, pinch };
+    }, [cx, cy]);
+    check(`${at}: touch pointer events: a tap's tooltip outlives the lift, and a pinch shows none`, seq.lifted && !seq.pinch, JSON.stringify(seq));
+    const outside = await page.locator('.d-bottom-pages-bar').boundingBox();
+    await page.touchscreen.tap(outside.x + outside.width - 4, outside.y + 4);
+    check(`${at}: a tap outside the chart hides the tooltip`, !(await tip()));
     check(`${at}: no page errors`, !errors.length, errors.join(' | '));
     await page.close();
   }

@@ -6,11 +6,19 @@ import { Component, Show, createSignal } from 'solid-js';
  */
 export const PasswordDialog: Component<{ confirm?: boolean; onSubmit: (password: string) => Promise<string | void>; onClose?: () => void }> = (props) => {
   const [error, setError] = createSignal('');
+  // one submit at a time: a double click during the key derivation would run it twice
+  let busy = 0;
   const submit = async (e: SubmitEvent) => {
     e.preventDefault();
     const [pw, again] = [...(e.currentTarget as HTMLFormElement).querySelectorAll('input')].map(i => i.value);
+    if (busy) return;
     if (props.confirm && pw !== again) return void setError("The passwords don't match");
-    setError((await props.onSubmit(pw)) || '');
+    busy = 1;
+    try {
+      setError((await props.onSubmit(pw)) || '');
+    } finally {
+      busy = 0;
+    }
   };
   const field = (placeholder: string) => <input type="password" class="d-input" placeholder={placeholder} required />;
 

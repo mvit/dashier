@@ -11,6 +11,8 @@ export interface XYSeries {
   line?: boolean;
   /** A line with the space under it filled. */
   area?: boolean;
+  /** Its data labels' number format, when not the chart's (passed to `format`). */
+  f?: any;
 }
 
 export interface XYData {
@@ -24,7 +26,7 @@ export interface XYData {
   /** A fixed end of the value axis (the chart's minimum or maximum). */
   fixed?: { min?: number; max?: number };
   /** Axis ticks and data labels, with up to `digits` decimals. */
-  format: (v: number, digits?: number) => string;
+  format: (v: number, digits?: number, f?: any) => string;
   /** Data labels: past the end of each bar (inside it, stacked), above each point. */
   showValues?: boolean;
   /** Bars stack on each other, and so do areas; plain lines never do. */
@@ -124,7 +126,7 @@ export function xyChart(d: XYData) {
     };
 
     // Room past the end of the value axis for what is written beside a point or a bar.
-    const labelled = series.map(s => (d.showValues ? s.data.map(v => (Number.isFinite(v) ? d.format(v) : '')) : []));
+    const labelled = series.map(s => (d.showValues ? s.data.map(v => (Number.isFinite(v) ? d.format(v, undefined, s.f) : '')) : []));
     let pointLabelWidth = 0;
     let valueWidth = 0;
     let negWidth = 0;

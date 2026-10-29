@@ -103,24 +103,31 @@ export function columnsFromRows(rows: Record<string, unknown>[], structure: Colu
 
 /**
  * Parses CSV straight into columns (no row objects), typed by `structure`, a slice at a time: the page repaints
- * in between, and `progress` gets the share of the text done (0–1) and the rows read so far.
+ * in between, and `progress` gets the share of the text done (0–1) and the rows read so far. `byColumn`: the CSV
+ * is stored as columns, a line each (its name, then its values), read value by value; a short column is padded blank.
  */
-export async function columnsFromCSVAsync(text: string, structure: ColumnSchema[], progress: (share: number, rows: number) => void): Promise<ColumnTable> {
+export async function columnsFromCSVAsync(text: string, structure: ColumnSchema[], progress: (share: number, rows: number) => void, byColumn = false): Promise<ColumnTable> {
   const types = Object.fromEntries(structure.map(c => [c.name, c.type])) as Record<string, FieldType>;
   let header: string[] = [];
   let builders: (Builder | null)[] = [];
-  const reader = csvReader(text, (fields) => {
-    if (!header.length) builders = (header = uniqueNames(fields)).map(h => (types[h] ? new Builder(types[h]) : null));
-    else for (let i = 0; i < builders.length; i++) builders[i]?.push(fields[i] ?? '');
-  });
-  const rows = () => builders.find(Boolean)?.length ?? 0;
+  const reader = csvReader(
+    text,
+    (fields) => {
+      if (!header.length) builders = (header = uniqueNames(fields)).map(h => (types[h] ? new Builder(types[h]) : null));
+      else for (let i = 0; i < builders.length; i++) builders[i]?.push(fields[i] ?? '');
+    },
+    byColumn ? (v, at) => (at ? builders[builders.length - 1]?.push(v) : builders.push(types[(header[header.length] = v)] ? new Builder(types[v]) : null)) : undefined
+  );
+  const rows = () => Math.max(0, ...builders.map(b => b?.length ?? 0));
   while (!reader.read(100)) {
     progress(reader.share(), rows());
     await new Promise(r => setTimeout(r));
   }
-  progress(1, rows());
+  const n = rows();
+  for (const b of builders) while (b && b.length < n) b.push('');
+  progress(1, n);
   return {
-    length: rows(),
+    length: n,
     names: header.filter(h => types[h]),
     types,
     columns: Object.fromEntries(header.flatMap((h, i) => (builders[i] ? [[h, builders[i]!.done()]] : [])))
