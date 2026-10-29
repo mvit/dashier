@@ -5,7 +5,8 @@ import { compareText, filterTest, keyText, shiftFilters, sortOrder, sortText } f
 import { distinctOf, filterFrame, frameRows, joinFrame, reader, rowsFrame, subset, tableFrame } from '../src/runtime/frames';
 import { datePartKey, datePartLabel, inRange, lastRange, shiftKey, shiftRange, toISODate } from '../src/runtime/dates';
 import { CONVERT, applyTypes, csvHead, inferStructure, parseCSV, parseJSON, renameColumnInText } from '../src/runtime/hydrate';
-import { decompressPayload, expandPayloads, holdBase64, holdText, isHeld, payloadSize, payloadText } from '../src/runtime/payloads';
+import { blobOf, decompressPayload, expandPayloads, hold, holdBase64, holdText, isHeld, payloadSize, payloadText } from '../src/runtime/payloads';
+import { deriveLock, seal, unseal } from '../src/runtime/crypt';
 import { parseMarkdown } from '../src/runtime/markdown';
 import { renameInTemplate, renderTemplate, templateVariables } from '../src/runtime/template';
 import { scatterPoints } from '../src/runtime/draw/scatter';
@@ -935,4 +936,47 @@ test('charts: all-blank values draw nothing; a line at 100% shows each series\' 
   assert.match(svg, /100%/);
   const tip = spec.tip!({ tagName: 'svg', closest: () => null } as any, null as any, { x: 200, y: 150 })!;
   assert.deepEqual(tip.rows.map(r => r.value), ['25.0% (1)', '75.0% (3)']);
+});
+
+// --- encryption -------------------------------------------------------------------
+
+const bytesOf = async (b: Blob) => [...new Uint8Array(await b.arrayBuffer())];
+const tables = (): [string, Blob][] => [['sales', new Blob(['date,revenue\n2024-01-01,5'])],['empty', new Blob([])], ['bin', new Blob([new Uint8Array([0, 10, 255])])]];
+
+test('encryption: AES-256-GCM round trip, PBKDF2 600,000 iterations, 16-byte salt, a fresh 12-byte IV per save', async () => {
+  const lock = await deriveLock('correct horse');
+  const [meta, cipher] = await seal(lock, tables());
+  assert.deepEqual([meta.version, meta.kdf, meta.iterations], [1, 'PBKDF2-SHA256', 600_000]);
+  assert.deepEqual([atob(meta.salt).length, atob(meta.iv).length], [16, 12]);
+  // the file's salt and iterations give the same key back from the password
+  const back = await unseal(await deriveLock('correct horse', meta), meta, cipher);
+  assert.deepEqual(back.map(t => t[0]), ['sales', 'empty', 'bin']);
+  for (const [i, [, b]] of tables().entries()) assert.deepEqual(await bytesOf(back[i][1]), await bytesOf(b));
+  const [again, cipher2] = await seal(lock, tables());
+  assert.equal(again.salt, meta.salt);
+  assert.notEqual(again.iv, meta.iv);
+  assert.notDeepEqual(await bytesOf(cipher2), await bytesOf(cipher));
+});
+
+test('encryption: a wrong password, a changed byte or a changed IV is rejected, never partly decrypted', async () => {
+  const [meta, cipher] = await seal(await deriveLock('secret'), tables());
+  await assert.rejects(unseal(await deriveLock('Secret', meta), meta, cipher));
+  const lock = await deriveLock('secret', meta);
+  const bytes = new Uint8Array(await cipher.arrayBuffer());
+  bytes[5] ^= 1;
+  await assert.rejects(unseal(lock, meta, new Blob([bytes])));
+  await assert.rejects(unseal(lock, { ...meta, iv: btoa('x'.repeat(12)) }, cipher));
+  await assert.rejects(unseal(lock, { ...meta, version: 2 as 1 }, cipher), /unknown encryption/);
+});
+
+test('encryption: the ciphertext is written out like a payload and read back from base64', async () => {
+  const lock = await deriveLock('pw');
+  const [meta, cipher] = await seal(lock, tables());
+  const ref = hold(cipher);
+  const written = (await expandPayloads(JSON.stringify({ title: ref, encryption: { ...meta, ciphertext: ref } }))).join('');
+  const file = JSON.parse(written);
+  assert.equal(file.title, ref); // the same text elsewhere stays as typed
+  assert.deepEqual(Buffer.from(file.encryption.ciphertext, 'base64').toJSON().data, await bytesOf(cipher));
+  const opened = await unseal(lock, file.encryption, await blobOf(await holdBase64(file.encryption.ciphertext)));
+  assert.equal(await opened[0][1].text(), 'date,revenue\n2024-01-01,5');
 });

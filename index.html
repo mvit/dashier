@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="generator" content="dashier">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10.5 13.5V4.5a9 9 0 1 0 9 9z' fill='%235b8def'/><path d='M13 11V2a9 9 0 0 1 9 9z' fill='%23f7a600'/></svg>">
   <title>Dashier tutorial</title>
@@ -40,13 +40,19 @@
   this guide describes everything a document needs, so decoding it never helps.
 
   doc      { format:"dashier", version:1, title, theme?, canvas?:{width, height} (fixed page size in px, default 1440×810;
-    viewers zoom and pan, never reflow; it grows taller to fit), sources:{<id>:Source}, pages:[Page],
-    filters?:[Filter] (every page), relationships?:[Relationship], measures?:[Measure] }
+    viewers zoom and pan, never reflow, except phones under 640px wide, which stack it into one column: cards two to
+    a row first, then the other visuals in reading order, slicers in a drawer; it grows taller to fit),
+    sources:{<id>:Source}, pages:[Page], filters?:[Filter] (every page), relationships?:[Relationship],
+    measures?:[Measure], encryption?:Encryption }
   Source   { format:"csv"|"json", encoding:"gzip+base64", structure:[{name, type, sortBy?}], payload }
     type: string|float|int|uint|datetime|boolean (datetime: ISO "2024-01-03[T14:05]", also 1/3/2024, "Jan 3, 2024").
     sortBy: another column whose values order this one's (month names by month number) on axes, legends, matrices,
     slicers. payload = base64(gzip(CSV with header | JSON array of rows)); in Python: base64.b64encode(gzip.compress(
     csv_bytes)).decode(), back with gzip.decompress(base64.b64decode(payload)).
+  Encryption { version:1, kdf:"PBKDF2-SHA256", iterations, salt, iv, ciphertext }: only in a file saved with a
+    password (Share > Encrypt with password...). Then every payload is "" and the tables are AES-256-GCM encrypted in
+    ciphertext (base64), with a key from PBKDF2-SHA256(password, salt); the file asks for the password on opening.
+    Without the password the data can't be read; edit the rest of the document as usual and keep encryption as is.
   Relationship { from:{table, field}, to:{table, field}, cardinality?, crossFilter?:"both" }: from = a fact (many side),
     to = a dimension (one side; a repeated key matches its first row). cardinality: "many-to-one" (default) |
     "one-to-one" (both are lookups; filters flow both ways) | "many-to-many" (no lookups: a row joins every match). Keys match by value, text ignoring case. Filters flow

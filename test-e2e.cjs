@@ -13,16 +13,7 @@ fs.writeFileSync(FILE, fs.readFileSync('dist/dashier.html', 'utf8').replace(
   (_, open, close) => open + fs.readFileSync('tests/e2e-doc.json', 'utf8') + close
 ));
 const URL = 'file:///' + FILE.replace(/\\/g, '/');
-const CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-].filter(Boolean);
+const executablePath = require('./tests/browser.cjs');
 
 let failures = 0;
 const check = (name, ok, extra = '') => {
@@ -32,11 +23,12 @@ const check = (name, ok, extra = '') => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const executablePath = CANDIDATES.find((p) => fs.existsSync(p));
   if (!executablePath) throw new Error('No Chrome/Edge found; set CHROME_PATH');
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-'));
 
-  const browser = await puppeteer.launch({ executablePath, headless: true, args: ['--window-size=1600,1000'] });
+  // a profile of our own: without one, Edge on Windows can refuse to start ("The browser is already running")
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-profile-'));
+  const browser = await puppeteer.launch({ executablePath, headless: true, userDataDir, args: ['--window-size=1600,1000'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1600, height: 1000 });
   const errors = [];
@@ -240,7 +232,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('.ed-topbar .ed-btn-primary');
   await page.waitForSelector('.d-context-menu');
   const share = await page.$$eval('.d-context-menu button', (bs) => bs.map((b) => b.textContent));
-  check('Share offers Save, Save a copy, Print, then Export and Open JSON', share.join() === 'SaveCtrl+S,Save a copy…,Print…Ctrl+P,Export JSON,Open JSON…' && (await page.$$('.d-context-menu hr')).length === 1, share.join());
+  check('Share offers Save, Save a copy, Print, then encryption, then Export and Open JSON', share.join() === 'SaveCtrl+S,Save a copy…,Print…Ctrl+P,Encrypt with password…,Remove encryption,Export JSON,Open JSON…' && (await page.$$('.d-context-menu hr')).length === 2, share.join());
   await page.keyboard.press('Escape');
   check('…and Esc closes it', !(await page.$('.d-context-menu')));
 
@@ -1204,6 +1196,96 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(200);
     check('a slicer pick makes cards compare with the previous period (none a year back)', (await compares()) === '+50.0% vs 2025 Q2 | -', await compares());
     await page.close();
+  }
+
+  // ── encryption ──────────────────────────────────────────────────────────────
+  {
+    const page = await browser.newPage(); // its own tab, saving into its own folder
+    page.on('pageerror', (e) => errors.push('encryption: ' + e.message));
+    await page.evaluateOnNewDocument(() => { delete window.showSaveFilePicker; });
+    // downloads land where the saving tab's own session says
+    const saveDir = async (p) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-'));
+      await (await p.createCDPSession()).send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dir });
+      return dir;
+    };
+    const download = async (dir) => {
+      for (let i = 0; i < 80; i++) {
+        await sleep(150);
+        const f = fs.readdirSync(dir).find((n) => n.endsWith('.dashier.html'));
+        if (f) return path.join(dir, f);
+      }
+    };
+    const docOf = (file) => JSON.parse(fs.readFileSync(file, 'utf8').match(/id="dashier-doc">([\s\S]*?)<\/script>/)[1]);
+    const cards = (p) => p.$$eval('.card-value', (es) => es.map((e) => e.textContent).join(' | '));
+    const share = async (p, item) => {
+      await p.click('.ed-btn-primary');
+      await p.waitForSelector('.d-context-menu');
+      await p.$$eval('.d-context-menu button', (b, re) => b.find((x) => new RegExp(re).test(x.textContent)).click(), item);
+    };
+    const submit = async (p, ...passwords) => {
+      const inputs = await p.$$('.d-password input');
+      for (const [i, pw] of passwords.entries()) {
+        await inputs[i].evaluate((e) => (e.value = ''));
+        await inputs[i].type(pw);
+      }
+      await p.click('.d-password .btn-primary');
+    };
+
+    await page.goto(URL);
+    await page.waitForSelector('.card-value');
+    check('an unencrypted file opens with no password prompt', !(await page.$('.d-password')));
+    const plain = await cards(page);
+    await share(page, 'Encrypt with password');
+    await page.waitForSelector('.d-password');
+    check('the encrypt dialog warns that a lost password loses the data', (await page.$eval('.d-password', (e) => e.textContent)).includes('If you lose the password, the data cannot be recovered.'));
+    await submit(page, 's3cret!', 'typo');
+    await page.waitForSelector('.d-form-error');
+    check('encrypting asks for the password twice', (await page.$eval('.d-form-error', (e) => e.textContent)) === "The passwords don't match");
+    let dir = await saveDir(page);
+    await submit(page, 's3cret!', 's3cret!');
+    const sealed = await download(dir);
+    check('Encrypt with password… saves the file', !!sealed);
+    const doc = sealed && docOf(sealed);
+    const e = doc?.encryption || {};
+    const original = JSON.parse(fs.readFileSync('tests/e2e-doc.json', 'utf8')).sources;
+    check('the saved file holds the data only as ciphertext, with no password or key', !!doc && Object.values(doc.sources).every((s) => s.payload === '') &&
+      e.version === 1 && e.kdf === 'PBKDF2-SHA256' && e.iterations === 600000 && atob(e.salt).length === 16 && atob(e.iv).length === 12 && e.ciphertext?.length > 100 &&
+      Object.keys(e).sort().join() === 'ciphertext,iterations,iv,kdf,salt,version' && !Object.values(original).some((s) => fs.readFileSync(sealed, 'utf8').includes(s.payload.slice(0, 40))), JSON.stringify({ ...e, ciphertext: e.ciphertext?.length }));
+    await page.close();
+
+    if (sealed) {
+      const p3 = await browser.newPage();
+      p3.on('pageerror', (e) => errors.push('encrypted: ' + e.message));
+      await p3.evaluateOnNewDocument(() => { delete window.showSaveFilePicker; });
+      await p3.goto('file:///' + sealed.replace(/\\/g, '/'));
+      await p3.waitForSelector('.d-password');
+      check('an encrypted file asks for its password before rendering anything', !(await p3.$('.d-visual-container')) && !(await p3.$eval('.d-password', (e) => e.textContent)).includes('If you lose'));
+      await submit(p3, 'wrong');
+      await p3.waitForSelector('.d-form-error');
+      check('a wrong password shows "Wrong password", renders nothing and lets you retry', (await p3.$eval('.d-form-error', (e) => e.textContent)) === 'Wrong password' && !(await p3.$('.d-visual-container')));
+      await submit(p3, 's3cret!');
+      await p3.waitForSelector('.card-value');
+      check('the right password opens the report with all its data', (await cards(p3)) === plain, await cards(p3));
+      dir = await saveDir(p3);
+      await share(p3, 'Remove encryption');
+      const opened = await download(dir);
+      const back = opened && docOf(opened);
+      check('Remove encryption saves the data readable again', !!back && !back.encryption && Object.entries(back.sources).every(([id, s]) => s.payload.length > 20 && zlib.gunzipSync(Buffer.from(s.payload, 'base64')).length > 0), opened);
+      await p3.close();
+
+      // a changed ciphertext never opens, not even with the right password
+      const tampered = sealed.replace(/\.dashier\.html$/, '.tampered.html');
+      fs.writeFileSync(tampered, fs.readFileSync(sealed, 'utf8').replace(/("ciphertext": ")(.)/, (_, k, c) => k + (c === 'A' ? 'B' : 'A')));
+      const p4 = await browser.newPage();
+      p4.on('pageerror', (e) => errors.push('tampered: ' + e.message));
+      await p4.goto('file:///' + tampered.replace(/\\/g, '/'));
+      await p4.waitForSelector('.d-password');
+      await submit(p4, 's3cret!');
+      await p4.waitForSelector('.d-form-error');
+      check('a tampered file is refused even with the right password', !(await p4.$('.d-visual-container')));
+      await p4.close();
+    }
   }
 
   check('no page errors', errors.length === 0, errors.join(' | '));

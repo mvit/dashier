@@ -1,4 +1,5 @@
 import type { DatePart, DateUnit } from '../runtime/dates';
+import type { Sealed } from '../runtime/crypt';
 export type FieldType = 'string' | 'float' | 'int' | 'uint' | 'datetime' | 'boolean';
 
 export interface ColumnSchema {
@@ -443,6 +444,8 @@ export interface DashDocument {
   relationships?: DashRelationship[];
   /** Quick measures. */
   measures?: DashMeasure[];
+  /** Set when the data is encrypted with a password: then every source's payload is "" and its bytes are in here. */
+  encryption?: Sealed;
 }
 
 export function createDefaultDocument(): DashDocument {

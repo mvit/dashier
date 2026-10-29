@@ -32,6 +32,8 @@ ISO = re.compile(r'^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$')
 
 # --- tables -------------------------------------------------------------------------------------------------
 cols, data = {}, {}
+if doc.get('encryption'):
+    W('the data is encrypted with a password: checks that need the rows (values, keys, filters) are skipped')
 for t, s in src.items():
     if '.' in t or '[' in t:
         F(f'table "{t}": no dots or brackets in table names ("table.field" and "[measure]" refs would be ambiguous)')
@@ -41,6 +43,8 @@ for t, s in src.items():
     for n in names:
         if '.' in n or '[' in n or ']' in n:
             F(f'{t}.{n}: no dots or brackets in column names')
+    if doc.get('encryption'):
+        continue
     try:
         text = gzip.decompress(base64.b64decode(s['payload'])).decode('utf-8-sig')
     except Exception as e:

@@ -2,9 +2,11 @@ import { Component, createSignal, Show } from 'solid-js';
 import { openMenuBelow } from './ContextMenu';
 import { store } from '../runtime/store';
 import { Logo, RedoIcon, UndoIcon } from './icons';
+import { PasswordDialog } from './PasswordDialog';
 
 export const TopBar: Component<{ onAbout: () => void }> = (props) => {
   const [notification, setNotification] = createSignal('');
+  const [asking, setAsking] = createSignal(false);
 
   const notify = (msg: string) => {
     setNotification(msg);
@@ -18,6 +20,13 @@ export const TopBar: Component<{ onAbout: () => void }> = (props) => {
     } catch (err: any) {
       notify(`Save error: ${err.message}`);
     }
+  };
+
+  /** A password set or removed is saved at once, so the file says what the menu did. */
+  const setPassword = async (password: string | null) => {
+    setAsking(false);
+    await store.setPassword(password);
+    await save();
   };
 
   const openJSON = () => {
@@ -41,6 +50,9 @@ export const TopBar: Component<{ onAbout: () => void }> = (props) => {
     <header class="ed-topbar">
       <Show when={notification()}>
         <div class="ed-toast">✓ {notification()}</div>
+      </Show>
+      <Show when={asking()}>
+        <PasswordDialog confirm onSubmit={setPassword} onClose={() => setAsking(false)} />
       </Show>
 
       <div class="ed-group ed-group-title">
@@ -78,6 +90,9 @@ export const TopBar: Component<{ onAbout: () => void }> = (props) => {
               { label: 'Save', kbd: 'Ctrl+S', onSelect: () => save() },
               { label: 'Save a copy…', onSelect: () => save(true) },
               { label: 'Print…', kbd: 'Ctrl+P', onSelect: () => store.print() },
+              '-',
+              { label: 'Encrypt with password…', onSelect: () => setAsking(true) },
+              { label: 'Remove encryption', disabled: !store.encrypted(), onSelect: () => setPassword(null) },
               '-',
               { label: 'Export JSON', onSelect: () => store.exportJSON() },
               { label: 'Open JSON…', onSelect: openJSON }

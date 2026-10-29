@@ -25,7 +25,8 @@ import {
 import { renameInTemplate, templateVariables } from './template';
 import { aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
 import { hydrateSource, renameColumnInText } from './hydrate';
-import { holdBase64, holdText, isHeld, payloadText } from './payloads';
+import { blobOf, hold, holdBase64, holdText, isHeld, payloadText, release } from './payloads';
+import { Lock, deriveLock, seal, unseal } from './crypt';
 import { saveDocument, exportDocumentJSON, readEmbeddedDoc } from './save';
 import { compareText, compareValues, keyText, replaceFilters, shiftFilters, sortText } from './data';
 import { ColumnTable } from './columns';
@@ -54,8 +55,10 @@ function createDashboardStore() {
   const [activePageId, setActivePageId] = createSignal<string>((initialDoc.pages.find(p => hash.includes(p.id)) || initialDoc.pages[0])?.id || '');
   const [selectedElementId, setSelectedElementId] = createSignal<string | null>(null);
 
-  // The editor is always on; preview hides the chrome and shows the sheet as a recipient would see it.
-  const [preview, setPreviewSignal] = createSignal(hash.includes('preview'));
+  // The editor is always on; preview hides the chrome and shows the sheet as a recipient would see it. A phone (under
+  // 640px wide) is always in preview, with the page reflowed into one column (theme.css): it views and filters.
+  const phone = matchMedia('(max-width: 639.98px)');
+  const [preview, setPreviewSignal] = createSignal(hash.includes('preview') || phone.matches);
   // print mode shows every page as it will print; nothing is editable there
   const [printing, setPrintingSignal] = createSignal(false);
   const editing = () => !preview() && !printing();
@@ -460,6 +463,7 @@ function createDashboardStore() {
   };
   const setPrinting = deselecting(setPrintingSignal);
   const setPreview = deselecting(setPreviewSignal);
+  phone.onchange = (e) => setPreview(e.matches);
 
   /**
    * Prints every page, one per sheet: lays them all out (off screen), lets the charts draw at their size, then
@@ -1284,11 +1288,52 @@ function createDashboardStore() {
     setDataStore(({ [id]: _, ...rest }) => rest);
   }
 
+  // --- Encryption (crypt.ts) ---
+  /** The file's key, once its password is set or entered: from then on every save encrypts the data with it. */
+  let lock: Lock | null = null;
+  const [encrypted, setEncrypted] = createSignal(false);
+
+  /** Opens an encrypted file's data with its password, all or nothing: false for a wrong password or a changed file. */
+  async function unlock(password: string) {
+    const e = doc.encryption!;
+    try {
+      const next = await deriveLock(password, e);
+      const tables = await unseal(next, e, await blobOf(e.ciphertext));
+      for (const [id, blob] of tables) if (isTable(id)) setDoc('sources', id, 'payload', hold(blob));
+      setDoc('encryption', undefined);
+      lock = next;
+      setEncrypted(true);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Sets the file's password (saves encrypt the data from then on), or removes it (null). */
+  async function setPassword(password: string | null) {
+    lock = password == null ? null : await deriveLock(password);
+    setEncrypted(!!lock);
+    setIsDirty(true);
+  }
+
+  /** Runs `use` on the document as it is written out: with a password, every payload sealed into `encryption`. */
+  async function sealed<T>(use: (d: DashDocument) => Promise<T>): Promise<T> {
+    if (!lock) return use(doc);
+    const ids = Object.keys(doc.sources);
+    const [meta, cipher] = await seal(lock, await Promise.all(ids.map(async id => [id, await blobOf(doc.sources[id].payload)] as [string, Blob])));
+    const ciphertext = hold(cipher);
+    try {
+      return await use({ ...doc, sources: Object.fromEntries(ids.map(id => [id, { ...doc.sources[id], payload: '' }])), encryption: { ...meta, ciphertext } });
+    } finally {
+      release(ciphertext);
+    }
+  }
+
   // --- Save / import ---
   async function save(forceSaveAs = false) {
     setIsSaving(true);
     try {
-      const result = await saveDocument(doc, { forceSaveAs });
+      const result = await sealed(d => saveDocument(d, { forceSaveAs }));
       if (result.success) setIsDirty(false);
       return result;
     } finally {
@@ -1398,7 +1443,11 @@ function createDashboardStore() {
     canUndo: () => historyLen() >= 1000,
     canRedo: () => historyLen() % 1000 > 0,
     save,
-    exportJSON: () => exportDocumentJSON(doc),
+    locked: () => !!doc.encryption,
+    unlock,
+    encrypted,
+    setPassword,
+    exportJSON: () => sealed(exportDocumentJSON),
     importDoc
   };
 }

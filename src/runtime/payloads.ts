@@ -12,11 +12,15 @@ let next = 0;
 /** True for an in-memory reference (as opposed to base64 text, e.g. straight from a file). */
 export const isHeld = (payload: string) => payload.startsWith(REF) && held.has(payload);
 
-const hold = (blob: Blob) => {
+/** Keeps bytes in memory; returns their reference. */
+export const hold = (blob: Blob) => {
   const ref = REF + ++next;
   held.set(ref, blob);
   return ref;
 };
+
+/** Forgets a reference's bytes (a save's ciphertext, once written). */
+export const release = (ref: string) => held.delete(ref);
 
 /** base64 characters decoded per step: a multiple of 4. */
 const B64_CHUNK = 1 << 22;
@@ -52,6 +56,9 @@ export const holdBase64 = async (b64: string) => hold(await decode(b64));
 /** Compresses new data into memory; returns its reference. */
 export const holdText = async (text: string) => hold(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob());
 
+/** A payload's gzip bytes (a reference or base64). */
+export const blobOf = async (payload: string) => held.get(payload) ?? decode(payload);
+
 /** The CSV/JSON text of a payload (a reference or base64). */
 export const payloadText = (payload: string) => gunzip(held.get(payload)?.stream() ?? base64Stream(payload));
 
@@ -79,8 +86,8 @@ async function base64Parts(payload: string): Promise<string[]> {
 export async function expandPayloads(text: string): Promise<BlobPart[]> {
   const parts: BlobPart[] = [];
   let last = 0;
-  // only a table's payload is a reference: the same text typed in a title stays as typed
-  for (const m of text.matchAll(/"payload":\s*"(@gzip:\d+)"/g)) {
+  // only a table's payload (or an encrypted file's ciphertext) is a reference: the same text typed in a title stays as typed
+  for (const m of text.matchAll(/"(?:payload|ciphertext)":\s*"(@gzip:\d+)"/g)) {
     const ref = m[1];
     if (!held.has(ref)) continue;
     const at = m.index! + m[0].length - ref.length - 1;

@@ -209,6 +209,11 @@ export const Canvas: Component = () => {
     { label: 'New page', onSelect: () => store.addPage() }
   ];
 
+  // On a phone the page's slicers live in a drawer, opened from a button at the top (theme.css shows the button, and
+  // hides the slicers in the page, only there).
+  const slicers = () => currentPage()?.elements.filter(e => e.type === 'slicer') ?? [];
+  const [drawer, setDrawer] = createSignal(false);
+
   const startRenamePage = (page: DashPage) => {
     if (!store.editing()) return;
     setEditingPageId(page.id);
@@ -251,9 +256,12 @@ export const Canvas: Component = () => {
                     <div
                       class={`d-visual-container ${isSelected() ? 'd-selected' : ''}`}
                       data-id={elem.id}
+                      data-type={elem.type}
                       style={{
                         'grid-column': `${elem.x + 1} / span ${elem.w}`,
-                        'grid-row': `${elem.y + 1} / span ${elem.h}`
+                        'grid-row': `${elem.y + 1} / span ${elem.h}`,
+                        // reading order (top to bottom, left to right), for the phone layout
+                        '--o': `${elem.y * 12 + elem.x}`
                       }}
                       onPointerDown={(e) => startDrag(e, elem, 'move')}
                       onClick={(e) => {
@@ -299,6 +307,18 @@ export const Canvas: Component = () => {
         </div>
         </div>
       </div>
+
+      <Show when={slicers().length}>
+        <button class={`ed-btn d-drawer-btn ${drawer() ? 'active' : ''}`} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
+          Filters
+        </button>
+        <Show when={drawer()}>
+          <div class="d-drawer" style={reportStyle(store.reportTheme())} onClick={(e) => e.stopPropagation()}>
+            <For each={slicers()}>{(elem) => <Widget element={elem} />}</For>
+            <button class="btn-primary" onClick={() => setDrawer(false)}>Done</button>
+          </div>
+        </Show>
+      </Show>
 
       {/* Bottom page tabs */}
       <footer class="d-bottom-pages-bar" onClick={(e) => e.stopPropagation()}>

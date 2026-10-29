@@ -314,6 +314,8 @@ button { font: inherit; background: none; border: 0; cursor: pointer; }
 .d-about p { color: var(--muted); font-size: 13px; }
 .d-about a { color: var(--selection); }
 .d-about .btn-primary { margin-top: 8px; }
+.d-password .d-input { width: 100%; font-size: 14px; padding: 8px 10px; }
+.d-drawer-btn { display: none; }
 .ed-logo { display: grid; padding: 3px; border-radius: 6px; }
 .ed-logo:hover { background: var(--chrome-2); }
 .btn-primary { background: var(--selection); color: #fff; padding: 7px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 600; }
@@ -521,18 +523,42 @@ kbd { margin-left: auto; padding-left: 14px; font: inherit; font-size: 10px; opa
 .d-print-view { position: absolute; top: 0; left: -100000px; }
 .d-print-view .d-canvas-sheet { position: relative; border: 0; box-shadow: none; }
 @media print {
-  html, body, .ed-root { height: auto !important; overflow: visible !important; background: none !important; }
+  html, body, .ed-root { background: none !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .d-tip, .ed-toast, .d-exit-preview { display: none !important; }
   /* print mode: only the pages, one per sheet of paper */
   .mode-printing > :not(.d-print-view) { display: none !important; }
   .mode-printing .d-print-view { position: static; }
   .d-print-slot { break-after: page; }
-  /* printing from the browser menu outside print mode: just the current sheet, unscaled */
-  .ed-root:not(.mode-printing) :is(.ed-topbar, .d-right-panes-strip, .ed-statusbar, .d-bottom-pages-bar) { display: none !important; }
+  .ed-root:not(.mode-printing) .d-bottom-pages-bar { display: none !important; }
+}
+/* Printing from the browser menu outside print mode, and phones: just the current sheet, unscaled, without the
+   editor around it, in a page that scrolls (or prints) as a whole. */
+@media print, (max-width: 639.98px) {
+  html, body, .ed-root { height: auto !important; overflow: visible !important; }
+  .ed-root:not(.mode-printing) :is(.ed-topbar, .d-right-panes-strip, .ed-statusbar) { display: none !important; }
   .ed-root:not(.mode-printing) :is(.ed-main, .ed-canvas-area, .d-canvas-workspace, .d-canvas-scroll-container) { display: block; overflow: visible; padding: 0; background: none; }
   .ed-root:not(.mode-printing) .d-canvas-stage { width: auto !important; height: auto !important; margin: 0; }
   .ed-root:not(.mode-printing) .d-canvas-sheet { position: static; transform: none !important; box-shadow: none; border: 0; }
+}
+/* Phones (store.phone in store.ts): the page reflows into one column, to view and filter. KPI cards come first, two to a
+   row, then every other visual at full width in reading order (--o, set by Canvas.tsx); slicers move to a drawer. */
+@media (max-width: 639.98px) {
+  .d-canvas-sheet { width: auto !important; min-height: 0 !important; padding: 12px; }
+  .d-canvas-workspace:has(.d-drawer-btn) .d-canvas-sheet { padding-top: 56px; }
+  .d-visuals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; gap: 10px; }
+  .d-visual-container { grid-column: 1 / -1 !important; grid-row: auto !important; order: var(--o); height: 300px; }
+  .d-visual-container[data-type="card"] { grid-column: span 1 !important; order: calc(var(--o) - 1000); height: 112px; }
+  .d-visual-container[data-type="markdown"], .d-markdown-widget { height: auto; overflow: visible; }
+  .d-visual-container[data-type="slicer"], .d-exit-preview { display: none !important; }
+  /* page tabs sized for a thumb, swiped sideways (no arrows), clear of the home indicator */
+  .d-bottom-pages-bar { position: sticky; bottom: 0; height: auto; padding: 0 0 env(safe-area-inset-bottom); }
+  .d-page-tabs-list { flex: 1; height: 48px; }
+  .d-bottom-tab { padding: 0 18px; font-size: 15px; }
+  .d-tabs-arrow { display: none; }
+  .d-drawer-btn { display: inline-flex; position: fixed; top: max(10px, env(safe-area-inset-top)); right: 10px; min-height: 40px; padding: 8px 16px; font-size: 15px; z-index: 61; background: var(--surface); border-color: var(--line); box-shadow: 0 2px 8px rgba(20, 30, 45, 0.15); }
+  .d-drawer { position: fixed; inset: 0 0 auto; z-index: 60; max-height: 85vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 56px 14px 14px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px rgba(20, 30, 45, 0.25); }
+  .d-drawer .d-slicer { height: auto; padding: 0; }
 }
 
 /* Measure dialog */

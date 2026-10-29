@@ -13,3 +13,5 @@ customers-*.csv
 !site/examples/*.dashier.html
 # Python bytecode (the skill scripts import each other)
 __pycache__/
+# screenshots from npm run phone
+/test-results/

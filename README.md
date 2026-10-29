@@ -1,6 +1,6 @@
 # Dashier
 
-Interactive reports in **one HTML file**. The editor is 136 KB: open it in a browser, build a report, **Share ▾ → Save** to write it back in place, and send the file to anyone. They open it in any browser, filter it, and can edit it too. There's no server, no account and no network request; the data travels compressed inside the file.
+Interactive reports in **one HTML file**. The editor is 142 KB: open it in a browser, build a report, **Share ▾ → Save** to write it back in place, and send the file to anyone. They open it in any browser, filter it, and can edit it too. There's no server, no account and no network request; the data travels compressed inside the file.
 
 The whole report (model, measures, pages, theme and data) is one JSON block in the file, so an LLM agent can build or edit it as easily as you can. The [Dashier skill](skill/dashier-report) teaches it how.
 
@@ -27,14 +27,17 @@ npm run build      # -> dist/dashier.html  (the single shareable file)
 npm test           # unit tests (aggregation, charts, dates, filters, joins, Markdown) + checks on the built file
 npm run unit       # just the unit tests (a fraction of a second)
 npm run upgrade -- report.dashier.html   # give a saved report the current build (keeps its document)
-npm run e2e        # drives it in headless Chrome/Edge (edit, filters, data dialogs, save → reload)
+npm run e2e        # drives it in headless Chrome/Edge (edit, filters, data dialogs, save → reload, encryption)
+npm run phone      # the sample report at 390×844 and 360×800 (Playwright): layout checks, screenshots in test-results/phone/
 ```
 
-`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 114 KB now. The guide and the tutorial document don't count toward it.
+`npm test` fails if the packed app (gzip + base85 of the JS and CSS) passes **140 KB**; it's 117 KB now. The guide and the tutorial document don't count toward it.
 
 The file opens in the editor. **▶ Preview** hides the chrome (Esc to return).
 
-The report page has a fixed size (default 1440×810, set under **Page size** when nothing is selected; stored as `canvas`). It is never reflowed to fit the window: zoom it with a trackpad pinch or the status bar at the bottom of the window (slider, −/+, **Fit width**, **Fit page**). The browser's own zoom (Ctrl/⌘ +/−/0, Ctrl + wheel) resizes the editor UI as usual. Pan with the scrollbars, by dragging the background, or with Space + drag or the middle button. The page grows taller if visuals run past the bottom. A `#preview` URL hash opens straight into preview, `#<page id>` opens a page and `#fit` fits the page to the window (combine them: `#preview,fit`), handy for links you share and reports embedded in a frame.
+The report page has a fixed size (default 1440×810, set under **Page size** when nothing is selected; stored as `canvas`). It is never reflowed to fit the window (except on a phone, below): zoom it with a trackpad pinch or the status bar at the bottom of the window (slider, −/+, **Fit width**, **Fit page**). The browser's own zoom (Ctrl/⌘ +/−/0, Ctrl + wheel) resizes the editor UI as usual. Pan with the scrollbars, by dragging the background, or with Space + drag or the middle button. The page grows taller if visuals run past the bottom. A `#preview` URL hash opens straight into preview, `#<page id>` opens a page and `#fit` fits the page to the window (combine them: `#preview,fit`), handy for links you share and reports embedded in a frame.
+
+On a phone (a window under 640 px wide) the report reflows into one column instead of being scaled down: KPI cards first, two to a row, then every other visual at full width in reading order (top to bottom, left to right on the desktop page). The page's slicers move into a drawer opened by the **Filters** button at the top. Phones view and filter; editing is for wider windows.
 
 ## Build a report with an LLM agent
 
@@ -63,10 +66,10 @@ When the data changes, rerun the scripts; or replace one table in the editor (it
 
 - **Document**: `<script type="application/dashier+json" id="dashier-doc">`. Every `<` is written `<`, so the JSON can never end its own script tag.
 - **Data**: each table is `base64(gzip(CSV | JSON))` plus a required `structure` manifest (column names and types). An LLM can build most visuals from the manifest alone, and can decode a payload with the one-liner in the file's header comment.
-- **Big data**: tables are held as columns (numbers in typed arrays; dates and repeated text as a dictionary plus codes), and what a visual reads is a *frame*: positions into those columns after filters and joins, never copied rows. Row objects are only made for what must be objects: the table rows on screen, the Edit data preview, and templates that use a whole table. A 2,000,000-row, 350 MB CSV saves as a ~215 MB file and reopens in ~5.5 s holding ~550 MB; a date-grouped chart over it draws in ~0.2 s, and sorting a 7-column table by a 2M-distinct column takes ~1.5 s. Payloads stay compressed in browser Blobs outside the JS heap (the document holds references like `@gzip:3`; saving writes base64 back in pieces), and files are decoded a few MB at a time.
+- **Big data**: tables are held as columns (numbers in typed arrays; dates and repeated text as a dictionary plus codes), and what a visual reads is a *frame*: positions into those columns after filters and joins, never copied rows. Row objects are only made for what must be objects: the table rows on screen, the Edit data preview, and templates that use a whole table. Payloads stay compressed in browser Blobs outside the JS heap (the document holds references like `@gzip:3`; saving writes base64 back in pieces), and files are decoded a few MB at a time.
 - **Upgrading**: each saved file carries the app it was saved with. `npm run upgrade -- file.dashier.html` writes `file.upgraded.dashier.html`: the same document with the app from `dist/dashier.html`.
 - **App**: the minified JS *and* CSS are one `base85(gzip(…))` blob (`pack85.cjs`: 5 characters per 4 bytes, against base64's 5⅓, about 7 KB less) behind a ~700-byte loader (the stylesheet is installed as an adopted sheet, so saving never duplicates it). Saving rewrites the page HTML with the new document and leaves the packed app untouched.
-- **Charts**: column, bar, line, area, line and column, scatter, pie, donut, radar, treemap, sankey and gauge, drawn by Dashier's own small renderers in `src/runtime/draw/`. They're ported from [Pele](https://github.com/obsidianmd/pele) (MIT, © kepano) and keep its speed tricks: layouts are plain arithmetic, text is measured without laying anything out (cached canvas widths), and a chart is one SVG string inserted once, drawn at its tile's exact size. Without Pele's Mermaid parsers that's ~5 KB gzipped instead of ~30 KB. A scatter keeps one dot per series per 3×3 px and draws each series as one path, so 2M rows redraw in about 15 ms. Text templates use a small built-in engine with Mustache's syntax plus filters (`src/runtime/template.ts`).
+- **Charts**: column, bar, line, area, line and column, scatter, pie, donut, radar, treemap, sankey and gauge, drawn by Dashier's own small renderers in `src/runtime/draw/`. They're ported from [Pele](https://github.com/obsidianmd/pele) (MIT, © kepano) and keep its speed tricks: layouts are plain arithmetic, text is measured without laying anything out (cached canvas widths), and a chart is one SVG string inserted once, drawn at its tile's exact size. Without Pele's Mermaid parsers that's ~5 KB gzipped instead of ~30 KB. A scatter keeps one dot per series per 3×3 px and draws each series as one path. Text templates use a small built-in engine with Mustache's syntax plus filters (`src/runtime/template.ts`).
 
 ## Report theme
 
@@ -95,7 +98,12 @@ The report canvas is themed by the document, independently of the editor's own l
 - **Matrix**: a pivot table. Rows (a hierarchy: each group expands into the next field with its +/−, showing its subtotal on its own row), Columns across, and Values summarized at every crossing. Format → Totals shows a total row, a total column, both or neither, and row subtotals. A header click sorts the rows (each group among its siblings). Values have the table's summaries, comparisons, running totals, % of grand total, conditional formatting and formats. Up to 100 column headers are shown; the totals count them all.
 - **Field pills** drag everywhere: reorder them in a multi-field well, drag one to another well of the visual to move it, onto a filter well to filter by it, or off the wells to remove it (Esc cancels).
 - **Print** (Share ▾ → Print…, or Ctrl/⌘+P) opens the browser's print dialog straight away with every page, each on its own sheet at the report's size (laid out off screen while the dialog is open). Saving to PDF is up to the dialog. Printing from the browser's own menu prints just the page on screen.
-- **Share ▾**: Save (Ctrl+S, in place via the File System Access API, or a download; a dot on the button marks unsaved changes), Save a copy, and Export / Open JSON for just the document.
+- **Share ▾**: Save (Ctrl+S, in place via the File System Access API, or a download; a dot on the button marks unsaved changes), Save a copy, **Encrypt with password…** / **Remove encryption** (each saves at once), and Export / Open JSON for just the document.
+
+## Limits
+
+- **Your data is encrypted when you set a password, and compressed but readable otherwise.** Without a password anyone with the file can decode its tables (the guide at the top of the file says how). With one (Share ▾ → Encrypt with password…) every table is sealed in one AES-256-GCM ciphertext, keyed by PBKDF2-SHA256 from the password (600,000 iterations, a random 16-byte salt, a fresh 12-byte IV on every save), using only the browser's Web Crypto API. The file asks for the password before it shows anything, and the decrypted data stays in memory. The report's layout, text, measures and column names stay readable; only the tables' rows are encrypted. **If you lose the password, the data cannot be recovered.**
+- **Phones view and filter, never edit**: the editor needs a window at least 640 px wide.
 
 ## License
 
