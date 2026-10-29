@@ -69,7 +69,7 @@ check('no unpacked <script type="module">', !/<script type="module"/.test(html))
 const js = html.match(/<script id="dashier-js" type="text\/plain">([^<]+)<\/script>/);
 check('packed app code present', !!js);
 if (js) {
-  const code = zlib.gunzipSync(require('./pack85.cjs').decode(js[1])).toString('utf-8');
+  const code = zlib.gunzipSync(require('../pack85.cjs').decode(js[1])).toString('utf-8');
   check('packed code is plain script (no import/export)', !/\bimport\.meta\b|^\s*(import|export)\s/m.test(code));
   try { new vm.Script(code); check('packed code parses', true, `${(code.length / 1024).toFixed(0)} KB unpacked`); }
   catch (e) { check('packed code parses', false, e.message); }
