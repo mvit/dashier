@@ -5,7 +5,7 @@ import { MatrixRow, buildMatrix } from '../../runtime/matrix';
 import { pct, withUnits } from '../../runtime/charts';
 import { sortOrder } from '../../runtime/data';
 import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, rangeOf, rowHeight, summaryHeader } from './tableKit';
-import { TableShell } from './TableWidget';
+import { SortTh, TableShell } from './TableWidget';
 
 /**
  * A matrix: row headers in a stepped hierarchy (each group expands into the next level), column
@@ -33,7 +33,7 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
     setCollapsed(next);
   };
   // a header click sorts by that cell (−1: the row labels)
-  const { sort, toggle: sortBy, arrow } = createSort<number>();
+  const sorter = createSort<number>(), { sort } = sorter;
 
   /** The rows on screen in order: each expanded group followed by its children, siblings sorted. */
   const visible = createMemo(() => {
@@ -89,10 +89,9 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
   const valueHeaders = () => columnFields().length === 0 || nv() > 1;
   // the top-left header: the row fields' names; a click sorts by them
   const corner = (rowSpan?: number) => (
-    <th class="d-matrix-corner" rowSpan={rowSpan} onClick={() => sortBy(-1)}>
+    <SortTh sort={sorter} k={-1} class="d-matrix-corner" rowSpan={rowSpan}>
       {rowTitle()}
-      <span class="sort-icon">{arrow(-1)}</span>
-    </th>
+    </SortTh>
   );
 
   return (
@@ -115,18 +114,16 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
                     // the last level's headers are the columns themselves; with one value they sort
                     const leaf = level === columnFields().length - 1 && nv() === 1;
                     return (
-                      <th class="d-matrix-group" colSpan={h.span * nv()} onClick={() => leaf && sortBy(i())}>
+                      <SortTh sort={sorter} k={i()} on={leaf} class="d-matrix-group" colSpan={h.span * nv()}>
                         {h.label}
-                        <span class="sort-icon">{leaf ? arrow(i()) : ''}</span>
-                      </th>
+                      </SortTh>
                     );
                   }}
                 </For>
                 <Show when={level === 0 && matrix().totalCol}>
-                  <th class="d-matrix-group" colSpan={nv()} rowSpan={columnFields().length} onClick={() => nv() === 1 && sortBy(matrix().cols)}>
+                  <SortTh sort={sorter} k={matrix().cols} on={nv() === 1} class="d-matrix-group" colSpan={nv()} rowSpan={columnFields().length}>
                     Total
-                    <span class="sort-icon">{nv() === 1 ? arrow(matrix().cols) : ''}</span>
-                  </th>
+                  </SortTh>
                 </Show>
               </tr>
             )}
@@ -136,10 +133,9 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
               <Show when={!columnFields().length}>{corner()}</Show>
               <For each={cellIndexes()}>
                 {(c) => (
-                  <th class="td-right" onClick={() => sortBy(c)}>
+                  <SortTh sort={sorter} k={c} class="td-right">
                     {valueLabel(values()[c % nv()])}
-                    <span class="sort-icon">{arrow(c)}</span>
-                  </th>
+                  </SortTh>
                 )}
               </For>
             </tr>

@@ -1,10 +1,14 @@
 import { Component, For, Show, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
-import { DashPage, DashElement } from '../types/model';
+import { DashPage, DashElement, SlicerElement } from '../types/model';
 import { store } from '../runtime/store';
 import { reportStyle } from '../runtime/theme';
 import { view, clampZoom, observeSize } from '../runtime/view';
-import { Widget } from './Widget';
-import { MenuEntry, openMenu } from './ContextMenu';
+import { Widget, cell, sheetStyle } from './Widget';
+import { MOD, MenuEntry, openMenu } from './ContextMenu';
+import { Card } from './ui';
+import { ClearFilterIcon } from './icons';
+import { pickSummary } from '../runtime/data';
+import { datePartLabel } from '../runtime/dates';
 
 // Must match .d-visuals-grid in theme.css
 const ROW_H = 85;
@@ -210,9 +214,11 @@ export const Canvas: Component = () => {
   ];
 
   // On a phone the page's slicers live in a drawer, opened from a button at the top (theme.css shows the button, and
-  // hides the slicers in the page, only there).
-  const slicers = () => currentPage()?.elements.filter(e => e.type === 'slicer') ?? [];
+  // hides the slicers in the page, only there): a card each, as filters are, saying what's picked; a lone one is open.
+  const slicers = () => (currentPage()?.elements.filter(e => e.type === 'slicer') ?? []) as SlicerElement[];
   const [drawer, setDrawer] = createSignal(false);
+  const [opened, setOpened] = createSignal(new Set<string>());
+  const flipSlicer = (id: string) => setOpened(o => (o.has(id) ? (o.delete(id), new Set(o)) : new Set(o.add(id))));
 
   const startRenamePage = (page: DashPage) => {
     if (!store.editing()) return;
@@ -232,12 +238,7 @@ export const Canvas: Component = () => {
         <div
           class={`d-canvas-sheet ${store.editing() ? 'editing' : ''} ${dragging() ? 'dragging' : ''}`}
           ref={sheetRef}
-          style={{
-            ...reportStyle(store.reportTheme()),
-            width: `${size().width}px`,
-            'min-height': `${size().height}px`,
-            transform: `scale(${zoom()})`
-          }}
+          style={{ ...sheetStyle(), transform: `scale(${zoom()})` }}
         >
           <Show
             when={currentPage()?.elements.length}
@@ -258,8 +259,7 @@ export const Canvas: Component = () => {
                       data-id={elem.id}
                       data-type={elem.type}
                       style={{
-                        'grid-column': `${elem.x + 1} / span ${elem.w}`,
-                        'grid-row': `${elem.y + 1} / span ${elem.h}`,
+                        ...cell(elem),
                         // reading order (top to bottom, left to right), for the phone layout
                         '--o': `${elem.y * 12 + elem.x}`
                       }}
@@ -272,7 +272,7 @@ export const Canvas: Component = () => {
                         if (!store.editing()) return;
                         store.setSelectedElementId(elem.id);
                         openMenu(e, [
-                          { label: 'Duplicate', kbd: 'Ctrl+D', onSelect: duplicate },
+                          { label: 'Duplicate', kbd: `${MOD}D`, onSelect: duplicate },
                           '-',
                           { label: 'Delete', kbd: 'Del', danger: true, onSelect: remove }
                         ]);
@@ -285,7 +285,7 @@ export const Canvas: Component = () => {
                           </For>
 
                           <div class="d-visual-toolbar" onClick={(e) => e.stopPropagation()}>
-                            <button class="d-tool-btn" title="Duplicate (Ctrl+D)" onClick={duplicate}>
+                            <button class="d-tool-btn" title={`Duplicate (${MOD}D)`} onClick={duplicate}>
                               ⧉
                             </button>
                             <button class="d-tool-btn danger" title="Delete (Del)" onClick={remove}>
@@ -308,14 +308,37 @@ export const Canvas: Component = () => {
         </div>
       </div>
 
+      {/* always there on a phone; with no slicers on the page, there's nothing to open */}
+      <button class={`ed-btn d-drawer-btn ${drawer() ? 'active' : ''}`} disabled={!slicers().length} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
+        Filters
+      </button>
       <Show when={slicers().length}>
-        <button class={`ed-btn d-drawer-btn ${drawer() ? 'active' : ''}`} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
-          Filters
-        </button>
         <Show when={drawer()}>
           <div class="d-drawer" style={reportStyle(store.reportTheme())} onClick={(e) => e.stopPropagation()}>
-            <For each={slicers()}>{(elem) => <Widget element={elem} />}</For>
-            <button class="btn-primary" onClick={() => setDrawer(false)}>Done</button>
+            <For each={slicers()}>
+              {(elem) => (
+                <Card
+                  class={`d-filter-card ${elem.selection ? 'active' : ''}`}
+                  open={opened().has(elem.id) || slicers().length === 1}
+                  flip={() => flipSlicer(elem.id)}
+                  title={
+                    <>
+                      <span class="filter-name">{elem.title || elem.field}</span>
+                      <span class="filter-type">{pickSummary(elem.selection, (v) => datePartLabel(v, elem.datePart), () => store.slicerOptions(elem).values.length) || 'All'}</span>
+                    </>
+                  }
+                  actions={
+                    <Show when={elem.selection}>
+                      <button class="d-filter-x" title="Clear the selection" onClick={() => store.setSlicerSelection(currentPage().id, elem.id, undefined)}>
+                        <ClearFilterIcon />
+                      </button>
+                    </Show>
+                  }
+                >
+                  <Widget element={elem} />
+                </Card>
+              )}
+            </For>
           </div>
         </Show>
       </Show>

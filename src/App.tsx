@@ -94,7 +94,7 @@ export const App: Component = () => {
 
   return (
     <div
-      class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''}`}
+      class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() ? 'mode-phone' : ''} ${(store.phone() || store.paper()) && !store.printing() ? 'mode-sheet' : ''}`}
       data-theme={store.isDark() ? 'dark' : 'light'}
     >
       <Show when={!store.preview()}>

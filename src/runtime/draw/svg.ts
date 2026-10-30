@@ -68,6 +68,19 @@ const ROOT_STYLE =
 export const svgDocument = (type: string, { w, h }: Area, content: string): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" class="c c-${type}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="${ROOT_STYLE}" fill="var(--_fg)" role="img">${content}</svg>`;
 
+/** An x/y chart's frame around its `plot`: gridlines under it, then the axis lines and ticks, tick labels and axis titles. */
+export const axesSvg = (type: string, area: Area, grid: string, plot: string, axis: string, labels: string, titles: string, after = ''): string =>
+  svgDocument(
+    type,
+    area,
+    (grid ? `<path class="c-grid" d="${grid}" stroke="var(--_a)"/>` : '') +
+      plot +
+      `<path class="c-axis" d="${axis}" fill="none" stroke="var(--_b)"/>` +
+      `<g class="c-axis-labels" font-size="${SMALL}" fill="var(--_m)">${labels}</g>` +
+      group(`class="c-axis-titles" font-size="${SMALL}"`, titles) +
+      after
+  );
+
 /** A rect's rounded corners. */
 export const ROUNDED = ' rx="4"';
 

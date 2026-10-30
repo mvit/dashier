@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "license": "MIT",
   "type": "module",
-  "description": "Dashier — a single-file, LLM-editable dashboard",
+  "description": "Dashier \u2014 a single-file, LLM-editable dashboard",
   "homepage": "https://mvit.github.io/dashier/",
   "private": true,
   "repository": {
@@ -15,8 +15,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node tests/unit.mjs && node tests/verify.cjs",
-    "e2e": "node tests/e2e.cjs",
-    "phone": "node tests/phone.cjs",
+    "e2e": "node tests/mapped.cjs tests/e2e.cjs",
+    "phone": "node tests/mapped.cjs tests/phone.cjs",
     "unit": "node tests/unit.mjs",
     "upgrade": "node upgrade.mjs"
   },
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@gfx/zopfli": "^1.0.15",
+    "esbuild": "^0.25.12",
     "puppeteer-core": "^25.15.0",
     "terser": "^5.51.2",
     "typescript": "^5.6.3",

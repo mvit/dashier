@@ -2,13 +2,13 @@ import { Component, For, JSX, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
 import { DashRelationship, FieldType, isNumericType } from '../types/model';
-import { DataGrid, PROFILE } from './DataGrid';
+import { DataGrid } from './DataGrid';
 import { frameRows } from '../runtime/frames';
+import { fieldStats } from '../runtime/charts';
 import { payloadSize } from '../runtime/payloads';
 
-type Tab = 'data' | 'relationships' | 'usage';
+type Tab = 'data' | 'relationships';
 
-const KIND_ICONS: Record<string, string> = { chart: '▥', card: '▭', table: '▦', markdown: 'T', slicer: '⧩' };
 
 /** Cardinality as the editor shows it, from this table to the other: many to one, one to one, one to many, many to many. */
 type Card = '*:1' | '1:1' | '1:*' | '*:*';
@@ -71,17 +71,13 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
   const [error, setError] = createSignal('');
   const src = () => store.doc.sources[id()];
   const frame = () => store.tableFrame(id());
-  // the grid shows (and profiles) the first rows as objects; the table itself stays in columns
-  const gridRows = createMemo(() => frameRows(frame(), 0, PROFILE));
-  const usages = () => store.usagesOf(id());
+  // the grid shows the first rows as objects; the table itself stays in columns (its counts are read from them)
+  const gridRows = createMemo(() => frameRows(frame(), 0, 200));
+  const uses = createMemo(() => store.columnUses(id()));
+  /** How many things (visuals, measures, relationships, filters, sort orders) use the table; the columns none uses. */
+  const usedBy = () => new Set([...uses().values()].flat()).size;
+  const unused = () => (src()?.structure ?? []).map(c => c.name).filter(n => !uses().get(n)?.length);
   const rels = () => store.relationshipsOf(id());
-
-  /** Visuals using the table, grouped by page. */
-  const usageByPage = createMemo(() => {
-    const pages = new Map<string, ReturnType<typeof usages>>();
-    for (const u of usages()) pages.set(u.page.id, [...(pages.get(u.page.id) ?? []), u]);
-    return [...pages.values()];
-  });
 
   /** Shows a store error (or clears it); true when there was none. */
   const ok = (err: string | null) => (setError(err || ''), !err);
@@ -184,7 +180,18 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
             />
             <div class="d-editdata-meta">
               {frame().length.toLocaleString()} rows · {src()?.structure.length ?? 0} columns ·{' '}
-              {src() ? (payloadSize(src().payload) / 1024).toFixed(1) : 0} KB stored
+              {((kb) => (kb === kb ? `${kb.toFixed(1)} KB stored` : 'compressing…'))(src() ? payloadSize(src().payload) / 1024 : 0)}
+              {/* what uses the table (each column's uses on hover), and the columns nothing uses */}
+              {' · '}
+              <span class="d-uses" title={[...uses()].map(([c, u]) => `${c}: ${u.join(', ')}`).join('\n') || 'Nothing uses this table yet'}>
+                {usedBy() ? `used by ${usedBy()}` : 'unused'}
+              </span>
+              <Show when={usedBy() && unused().length}>
+                {' · '}
+                <span class="d-uses none" title={`Nothing uses:\n${unused().join('\n')}`}>
+                  {unused().length} column{unused().length > 1 ? 's' : ''} unused
+                </span>
+              </Show>
             </div>
           </div>
         </div>
@@ -199,7 +206,6 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
       <div class="d-dtabs d-dialog-tabs">
         {tabBtn('data', 'Data')}
         {tabBtn('relationships', 'Relationships', rels().length)}
-        {tabBtn('usage', 'Used by', usages().length)}
       </div>
 
       <Show when={error()}>
@@ -210,7 +216,8 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
         <Show when={tab() === 'data'}>
           <div class="d-editdata-hint">
             Click a column name to rename it everywhere it's used. Click a type badge to change how its values are read; the
-            stored data is unchanged, and values that don't fit the type show as blank.
+            stored data is unchanged, and values that don't fit the type show as blank. Hover a column for its blanks and
+            other counts.
           </div>
           <div class="modal-body d-editdata-grid">
             <DataGrid
@@ -220,6 +227,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
               limit={200}
               onType={(col, t) => store.setColumnType(id(), col, t as FieldType)}
               onSortBy={(col, by) => store.setSortBy(id(), col, by)}
+              stats={(col) => fieldStats(frame(), col)}
               onRename={async (column, input) => {
                 if (!ok(await store.renameColumn(id(), column, input.value))) input.value = column;
               }}
@@ -301,35 +309,6 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
           </div>
         </Show>
 
-        <Show when={tab() === 'usage'}>
-          <div class="modal-body">
-            <Show when={usages().length} fallback={<div class="d-empty-state">No visuals use this table yet.</div>}>
-              <For each={usageByPage()}>
-                {(group) => (
-                  <div class="d-usage-group">
-                    <div class="d-usage-page">{group[0].page.title}</div>
-                    <div class="d-usages">
-                      <For each={group}>
-                        {(u) => (
-                          <button class="d-usage" title="Go to this visual" onClick={() => (store.selectElement(u.page.id, u.element.id), props.onClose())}>
-                            <span class="d-usage-icon">{KIND_ICONS[u.element.type] ?? '▭'}</span>
-                            <span class="d-usage-main">
-                              <b>{u.element.title || u.element.type}</b>
-                              <span class="d-usage-fields">
-                                <For each={u.fields}>{(f) => <span class="d-usage-field">{f}</span>}</For>
-                              </span>
-                            </span>
-                            <span class="d-usage-go">Go to →</span>
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
-        </Show>
       </Show>
 
       <div class="modal-footer">

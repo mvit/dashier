@@ -1,9 +1,10 @@
 import { Component, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
-import { columnsText, csvHead, inferStructure, parseCSV, parseJSON, textToColumnsAsync } from '../runtime/hydrate';
+import { csvHead, inferStructure, parseCSV, parseJSON } from '../runtime/hydrate';
 import { holdText } from '../runtime/payloads';
-import { columnsFromRows } from '../runtime/columns';
+import { columnsFromRows, columnsFromText } from '../runtime/columns';
+import { fieldStats } from '../runtime/charts';
 import { frameRows, tableFrame } from '../runtime/frames';
 import { FieldType } from '../types/model';
 import { DataGrid } from './DataGrid';
@@ -87,7 +88,10 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
     return { missing, added: [...now].filter(c => !before.has(c)), visuals, rels };
   });
   // typed as the table will be, as Edit Data shows it
-  const preview = createMemo(() => frameRows(tableFrame(columnsFromRows(parsed().rows, structure()))));
+  const previewFrame = createMemo(() => tableFrame(columnsFromRows(parsed().rows, structure())));
+  const preview = createMemo(() => frameRows(previewFrame()));
+  /** A column's counts in the preview (and that they're of its first rows only, when the file has more). */
+  const stats = (col: string) => fieldStats(previewFrame(), col) + (parsed().total > parsed().rows.length ? ` (first ${parsed().rows.length} rows)` : '');
   const ready = () => parsed().total > 0;
 
   const openFile = async (file?: File) => {
@@ -129,15 +133,13 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
     try {
       const t = text().trim();
       const total = parsed().total;
-      setBusy({ text: 'Packing the data into the file…' });
-      // stored as columns (a line each): smaller, and faster to open
-      const payload = await holdText(await columnsText(t, format()));
-      const table = await textToColumnsAsync(t, format(), structure(), (s) =>
-        s.step === 'read' && setBusy({ text: `Reading rows: ${s.rows.toLocaleString()} of ${total.toLocaleString()}`, share: s.share })
-      );
+      // one reading gives the table and its stored form (columns, a line each: smaller, and faster to open), which
+      // is gzipped in the background
+      const { table, stored } = await columnsFromText(t, format(), structure(), (share, rows) => setBusy({ text: `Reading rows: ${rows.toLocaleString()} of ${total.toLocaleString()}`, share }), true);
+      const payload = holdText(stored);
       setBusy({ text: 'Adding the table…', share: 1 });
       await paint();
-      await store.addDataSource(id, { format: 'csv-columns', encoding: 'gzip+base64', structure: structure(), payload }, table);
+      await store.addDataSource(id, { structure: structure(), payload }, table);
       props.onClose();
     } catch (err: any) {
       setError(String(err?.message || err));
@@ -263,7 +265,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
               </Show>
             </Show>
             <div class="d-getdata-hint">Preview — check each column's type (click its badge to change it).</div>
-            <DataGrid columns={structure()} rows={preview()} limit={100} onType={(col, t) => setTypes({ ...types(), [col]: t })} />
+            <DataGrid columns={structure()} rows={preview()} limit={100} onType={(col, t) => setTypes({ ...types(), [col]: t })} stats={stats} />
           </Show>
         </Show>
 

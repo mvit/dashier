@@ -5,8 +5,6 @@
   "theme": { "mode": "light" },
   "sources": {
     "regional_metrics": {
-      "format": "csv-columns",
-      "encoding": "gzip+base64",
       "structure": [
         { "name": "region", "type": "string" },
         { "name": "quarter", "type": "string" },
@@ -16,8 +14,6 @@
       "payload": "H4sIAAAAAAAC/5VOMVLEMAzs84p7gIaxFclxyivoGIa8gPFkBLggASe59yP5PFQUoZF3td7VFnnP6wLPa9k/LtdPKXlO/2CPR1m/5O/nuuV0eUlzfsvzWfKU9rz8pp9m3feRyi4FJg8TwtTDRGdwV+QmyyHgkdi5B3bgqUdFTlGIoyJk8COTouhgjNREj72iQUUcY9tRDPeQyJaBunI118Te244sF1sIoW+gXlIjhyYFuid0ad7zTV6PTcqmF7AWY5vmAbQIa1NPkE2ueNBSYM20YKgm+4jOrGRONi0MOgal3Q+2TwyVCQIAAA=="
     },
     "region_targets": {
-      "format": "csv-columns",
-      "encoding": "gzip+base64",
       "structure": [
         { "name": "area", "type": "string" },
         { "name": "target_revenue", "type": "float" }

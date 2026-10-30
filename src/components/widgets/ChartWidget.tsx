@@ -3,6 +3,7 @@ import { ChartElement } from '../../types/model';
 import { store } from '../../runtime/store';
 import { aggregate, buildChart, chartKind, chartReady, formatCompact, formatValue } from '../../runtime/charts';
 import { ChartHost } from './ChartHost';
+import { empty } from './CardWidget';
 import type { Frame } from '../../runtime/frames';
 import type { ChartFormat } from '../../runtime/charts';
 
@@ -79,7 +80,7 @@ export const ChartWidget: Component<{ element: ChartElement }> = (props) => {
 
       <Show
         when={chartReady(el())}
-        fallback={<div class="d-chart-empty">{store.editing() ? 'Drag fields from the Data pane into this chart’s slots' : ''}</div>}
+        fallback={empty('Drag fields from the Data pane into this chart’s slots')}
       >
         {/* rows whose values are all blank are no data either */}
         <Show when={rows().length > 0 && (spec().draw || chartKind(el().chartType) === 'gauge')} fallback={<div class="d-chart-empty">No data for these fields</div>}>

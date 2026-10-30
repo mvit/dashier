@@ -2,6 +2,7 @@ import { Component, For, Index, Show, createMemo, createSignal } from 'solid-js'
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
+import { Check, Select } from './ui';
 import { formatValue, summaryLabel, SUMMARY_NAMES, withUnits } from '../runtime/charts';
 import { OPS, compileMeasure, measureError, measureFormat, wheres } from '../runtime/measures';
 import { AggregationMethod, DashMeasure, MeasureOp, MeasureOperand, Units, ValueFormat, isNumericType } from '../types/model';
@@ -123,9 +124,7 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
 
         <Show when={mode() === 'summarize'}>
           <div class="d-mrow">
-            <select class="d-well-select d-measure-agg" value={aggregate()} onChange={(e) => setAggregate(e.currentTarget.value as AggregationMethod)}>
-              <For each={SUMMARIES}>{(m) => <option value={m}>{m === 'count' ? 'Count of rows' : SUMMARY_NAMES[m]}</option>}</For>
-            </select>
+            <Select class="d-well-select d-measure-agg" value={aggregate()} options={SUMMARIES.map(m => [m, m === 'count' ? 'Count of rows' : SUMMARY_NAMES[m]])} set={setAggregate} />
             <Show when={aggregate() !== 'count'}>
               of
               <select class="d-well-select d-measure-field" value={field()} onChange={(e) => setField(e.currentTarget.value)}>
@@ -162,10 +161,9 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
                   <div class="d-measure-values">
                     <For each={store.distinct(c().table, c().field).slice(0, 500)}>
                       {(v) => (
-                        <label class="d-checkbox-label">
-                          <input type="checkbox" checked={c().values.includes(v)} onChange={(e) => setCond(i, { values: e.currentTarget.checked ? [...c().values, v] : c().values.filter(x => x !== v) })} />
+                        <Check checked={c().values.includes(v)} set={() => setCond(i, { values: c().values.includes(v) ? c().values.filter(x => x !== v) : [...c().values, v] })}>
                           {v}
-                        </label>
+                        </Check>
                       )}
                     </For>
                   </div>
@@ -190,15 +188,11 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
 
         <label class="d-mfield">
           Format
-          <select class="d-well-select" value={format()} onChange={(e) => setFormat(e.currentTarget.value as ValueFormat | '')}>
-            <For each={FORMAT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
-          </select>
+          <Select value={format() || undefined} options={FORMAT_CHOICES} set={(v) => setFormat(v ?? '')} />
         </label>
         <label class="d-mfield">
           Display units
-          <select class="d-well-select" value={units()} onChange={(e) => setUnits(e.currentTarget.value as Units | '')}>
-            <For each={UNIT_CHOICES}>{([v, label]) => <option value={v ?? ''}>{label}</option>}</For>
-          </select>
+          <Select value={units() || undefined} options={UNIT_CHOICES} set={(v) => setUnits(v ?? '')} />
         </label>
 
         <div class={`d-measure-preview ${problem() ? 'muted' : ''}`}>

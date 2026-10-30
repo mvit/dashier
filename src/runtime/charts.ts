@@ -2,7 +2,7 @@ import { AggregationMethod, ChartElement, ChartOptions, ChartType, Compare, Show
 import { DatePart, datePartKey, datePartLabel, shiftKey } from './dates';
 import { compareText } from './data';
 import type { MeasureFn } from './measures';
-import { Frame, reader, subset, tableFrame } from './frames';
+import { Frame, blanksOf, codesOf, distinctOf, reader, subset, tableFrame } from './frames';
 import type { Area } from './draw/svg';
 import { seriesColor } from './draw/svg';
 import { xyChart } from './draw/xy';
@@ -58,6 +58,8 @@ export function formatValue(val: number | string | null | undefined, fmt?: strin
  */
 /** Nothing in the cell: null, empty or only spaces (which Number() would read as 0). */
 const blankCell = (v: unknown) => v == null || (typeof v === 'string' && !v.trim());
+/** A cell as the number numeric summaries read: NaN for a blank or anything that isn't one. */
+export const numberOf = (v: unknown) => (typeof v === 'number' ? v : blankCell(v) ? NaN : Number(v));
 
 export function summarizeRead(n: number, read: (k: number) => unknown, method: AggregationMethod = 'sum'): number | null {
   if (method === 'count') return n;
@@ -74,10 +76,8 @@ export function summarizeRead(n: number, read: (k: number) => unknown, method: A
   // the spread by Welford's method: no loss of precision summing squares of large values
   let count = 0, sum = 0, min = Infinity, max = -Infinity, first = 0, last = 0, mean = 0, m2 = 0, top = 0, most = 0;
   for (let k = 0; k < n; k++) {
-    const v = read(k);
-    if (blankCell(v)) continue;
-    const x = typeof v === 'number' ? v : Number(v);
-    if (Number.isNaN(x)) continue;
+    const x = numberOf(read(k));
+    if (x !== x) continue;
     if (!count++) first = x;
     sum += x;
     if (x < min) min = x;
@@ -142,6 +142,16 @@ export function summarizeValue(n: number, read: (k: number) => unknown, method: 
     if (method === 'first') break;
   }
   return out;
+}
+
+/** A field's counts, for a column's tooltip: its blanks, distinct values, and smallest and largest (earliest and latest for dates). */
+export function fieldStats(f: Frame, field: string): string {
+  const read = reader(f, field);
+  if (!read) return '';
+  const [lo, hi] = (['min', 'max'] as const).map(m => summarizeValue(f.length, read, m));
+  const show = (v: unknown) => (typeof v === 'number' ? v.toLocaleString() : String(v));
+  const range = lo == null ? [] : [lo === hi ? `all ${show(lo)}` : `${show(lo)} to ${show(hi)}`];
+  return [`${blanksOf(f, field).toLocaleString()} blank`, `${distinctOf(f, field).length.toLocaleString()} distinct`, ...range].join(' · ');
 }
 
 /** Reduces a field over a frame's rows (count ignores the field). Returns null when nothing is numeric. */
@@ -245,27 +255,35 @@ export function reducer(frame: Frame, y: string | MeasureFn, method: Aggregation
   return pos => (read ? summarizeRead(pos.length, i => read(pos[i]), method) : null);
 }
 
-/** Each frame row's key, as an index into `names` (first-seen order; a blank is "(Blank)"). Each distinct value is named once. */
-function keyIndex(frame: Frame, key: Key) {
+/** Each frame row's key, as an index into `names` (first-seen order; a blank is named `blank`). Each distinct value is named once. */
+export function keyIndex(frame: Frame, key: Key, blank = '(Blank)') {
   const { field, part } = typeof key === 'string' ? { field: key, part: undefined } : key;
   const read = reader(frame, field) ?? (() => undefined);
+  // a dictionary column's rows are told apart by code (−1, no row, is slot 0), others by value
+  const d = codesOf(frame, field), perCode = new Int32Array(d ? d.words.length + 1 : 0).fill(-1);
   const names: string[] = [], byValue = new Map<unknown, number>(), byName = new Map<string, number>();
+  const name = (v: unknown) => {
+    const s = part ? datePartKey(String(v ?? ''), part) : v;
+    const n = s == null || s === '' ? blank : String(s);
+    return byName.get(n) ?? byName.set(n, names.push(n) - 1).get(n)!;
+  };
   const at = new Int32Array(frame.length);
   for (let k = 0; k < frame.length; k++) {
-    const v = read(k);
-    let i = byValue.get(v);
-    if (i === undefined) {
-      const s = part ? datePartKey(String(v ?? ''), part) : v;
-      const n = s == null || s === '' ? '(Blank)' : String(s);
-      byValue.set(v, (i = byName.get(n) ?? byName.set(n, names.push(n) - 1).get(n)!));
+    if (d) {
+      const c = d.code(k) + 1;
+      at[k] = perCode[c] >= 0 ? perCode[c] : (perCode[c] = name(c ? d.words[c - 1] : null));
+    } else {
+      const v = read(k);
+      let i = byValue.get(v);
+      if (i === undefined) byValue.set(v, (i = name(v)));
+      at[k] = i;
     }
-    at[k] = i;
   }
   return { names, at };
 }
 
 /** Frame positions by bucket (row k is in bucket `of[k]`, 0…n−1), each in row order: slices of one array, no list per cell. */
-function buckets(of: Int32Array, n: number): Int32Array[] {
+export function buckets(of: Int32Array, n: number): Int32Array[] {
   const start = new Int32Array(n + 1);
   for (let k = 0; k < of.length; k++) start[of[k] + 1]++;
   for (let b = 0; b < n; b++) start[b + 1] += start[b];

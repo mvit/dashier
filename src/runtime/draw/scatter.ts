@@ -11,7 +11,7 @@ import { ChartElement } from '../../types/model';
 import { Frame, reader } from '../frames';
 import { datePartLabel } from '../dates';
 import { ChartContext, ChartFormat, ChartSpec, Tip, formatCompact, formatFull, keyOf, keyReader, legendOf, reducer, valueOf } from '../charts';
-import { Area, PAD, SMALL, TICK, TINY, esc, labelSvg, layoutLabel, measurer, num, pt, seriesColor, sideTitle, svgDocument, textAt, tickLabels, valueAxis } from './svg';
+import { Area, PAD, SMALL, TICK, TINY, esc, labelSvg, layoutLabel, measurer, num, pt, seriesColor, sideTitle, axesSvg, textAt, tickLabels, valueAxis } from './svg';
 
 /** Points kept per series: at most one in each CELL×CELL pixel cell (a dot is DOT px wide, so a point left out is under one that is drawn). */
 const CELL = 3;
@@ -197,16 +197,17 @@ export function buildScatter(el: ChartElement, frame: Frame, ctx: ChartContext =
             .join('')}</g>`
         : '';
 
-    return svgDocument(
+    return axesSvg(
       'scatter',
       area,
-      `<path class="c-grid" d="${grid}" stroke="var(--_a)"/>` +
-        `<g class="c-plot">${paths
+      grid,
+      `<g class="c-plot">${paths
           .map((d, s) => (d.length ? `<path class="c-points" data-s="${s}" d="${d.join('')}" fill="none" stroke="${seriesColor(s)}" stroke-width="${DOT}" stroke-linecap="round" stroke-opacity="0.75"/>` : ''))
-          .join('')}</g>` +
-        `<path class="c-axis" d="${axis}" fill="none" stroke="var(--_b)"/>` +
-        `<g class="c-axis-labels" font-size="${SMALL}" fill="var(--_m)">${ticks}</g>` +
-        `<g class="c-axis-titles" font-size="${SMALL}">${titles}</g>${labels}`
+          .join('')}</g>`,
+      axis,
+      ticks,
+      titles,
+      labels
     );
   };
 

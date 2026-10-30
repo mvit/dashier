@@ -8,42 +8,19 @@ Writes a Dashier document into a copy of a Dashier template.
 DOC.json is a normal Dashier document, except that a source may name a CSV file instead of carrying a payload:
 
     "fact_sales": {"file": "data/fact_sales.csv"}                        # structure inferred
-    "dim_date":   {"file": "data/dim_date.csv", "structure": [...]}       # structure as given
+    "dim_date":   {"file": "data/dim_date.csv", "structure": [...]}       # its columns as given, any others inferred
 
-Paths are relative to DOC.json. The CSV is stored as columns ("csv-columns": a CSV line per column, its name then
-its values), gzip+base64, with its structure (column names and types, in header order). Sources that already
-have a payload are kept as they are. Every "<" in the JSON is written as \\u003c, and nothing else in the
+Paths are relative to DOC.json. The CSV is read as the app reads one (values trimmed, lines of only spaces skipped)
+and stored as columns (a CSV line per column, its name then its values), gzip+base64, with its structure: column
+names in header order, and types as given or guessed as the app guesses them (dashier_data.infer). A column the
+structure names but the CSV lacks is left out. Sources that already have a payload are kept as they are. Every "<" in the JSON is written as \\u003c, and nothing else in the
 template is touched. The template itself is never modified.
 """
-import base64, csv, gzip, io, itertools, json, os, re, sys
+import csv, itertools, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from get_dashier import fetch
-
-NUM = re.compile(r'^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$')
-DATE = re.compile(r'^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$')
-
-
-def infer(values):
-    """The column's type from all of its values: blank cells don't count; mixed kinds are text."""
-    kinds = set()
-    for v in values:
-        s = v.strip()
-        if not s:
-            continue
-        if s.lower() in ('true', 'false'):
-            kinds.add('boolean')
-        elif NUM.match(s) and not re.match(r'^[-+]?0\d', s):  # 00501 is a code, not a number
-            kinds.add('int' if re.match(r'^[-+]?\d+$', s) else 'float')
-        elif DATE.match(s):
-            kinds.add('datetime')
-        else:
-            kinds.add('string')
-    if kinds <= {'int'}:
-        return 'int' if kinds else 'string'
-    if kinds <= {'int', 'float'}:
-        return 'float'
-    return kinds.pop() if len(kinds) == 1 else 'string'
+from dashier_data import ISO_DATE, infer, pack
 
 
 def main(template, doc_path, out):
@@ -56,17 +33,20 @@ def main(template, doc_path, out):
     for name, src in (doc.get('sources') or {}).items():
         if 'file' not in src:
             continue
-        rows = [r for r in csv.reader(open(os.path.join(base, src.pop('file')), encoding='utf-8-sig', newline='')) if r]
+        # as the app reads a CSV: a line of only spaces is no record, and values are trimmed
+        rows = [[v.strip() for v in r] for r in csv.reader(open(os.path.join(base, src.pop('file')), encoding='utf-8-sig', newline='')) if r and (len(r) > 1 or r[0].strip())]
         header = rows[0]
         if len(set(header)) != len(header):
             sys.exit(f'{name}: duplicate column names {header}')
         given = {c['name']: c for c in src.get('structure') or []}
-        src['structure'] = [given.get(h) or {'name': h, 'type': infer(r[i] if i < len(r) else '' for r in rows[1:])} for i, h in enumerate(header)]
         # stored as columns, a CSV line each (its name, then its values): smaller and faster to open
-        out_ = io.StringIO()
-        csv.writer(out_, lineterminator='\n').writerows(itertools.zip_longest(*(r[:len(header)] for r in rows), fillvalue=''))
-        src.update(format='csv-columns', encoding='gzip+base64', payload=base64.b64encode(gzip.compress(out_.getvalue().encode('utf-8'), 9)).decode())
+        columns = list(itertools.zip_longest(*(r[:len(header)] for r in rows), fillvalue=''))
+        src['structure'] = [given.get(h) or {'name': h, 'type': infer(c[1:])} for h, c in zip(header, columns)]
+        src['payload'] = pack(columns)
         print(f'{name}: {len(rows) - 1} rows, ' + ', '.join(f"{c['name']}:{c['type']}" for c in src['structure']))
+        for c, col in zip(src['structure'], columns):
+            if c['type'] == 'datetime' and any(v and not ISO_DATE.match(v) for v in col[1:]):
+                print(f"  {name}.{c['name']}: dates that aren't ISO (yyyy-mm-dd) are read, but write them ISO: 03/04/2024 is March or April only by the column's other dates")
     body = json.dumps(doc, indent=1, ensure_ascii=False).replace('<', '\\u003c')
     html = html[:m.start(2)] + '\n' + body + '\n  ' + html[m.end(2):]
     open(out, 'w', encoding='utf-8').write(html)

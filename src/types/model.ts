@@ -13,11 +13,8 @@ export interface ColumnSchema {
 
 /** A table's text: CSV with a header row or JSON rows (data being added), or CSV with a line per column (as stored). */
 export type DataSourceFormat = 'csv' | 'csv-columns' | 'json';
-export type DataSourceEncoding = 'gzip+base64';
 
 export interface DashDataSource {
-  format: 'csv-columns';
-  encoding: DataSourceEncoding;
   /** LLM-facing manifest: describes the payload's columns so it needn't be decoded for simple visuals. */
   structure: ColumnSchema[];
   /** gzip+base64 of the table as CSV with a line per column: its name, then its values. */
@@ -33,6 +30,8 @@ export interface DashTheme {
   muted?: string; // secondary text and axes
   border?: string; // gridlines and table rules (visuals have no outer border)
   accent?: string; // KPI values and gauges
+  positive?: string; // a comparison that's good news (up, or down where lower is better)
+  negative?: string; // a comparison that's bad news, and a visual's error
   palette?: string[]; // series colors, up to 8
   font?: string; // CSS font-family
   radius?: number; // tile corner radius, px
@@ -44,11 +43,11 @@ const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, 
 
 const BASE = {
   light: {
-    background: '#F3F5F9', surface: '#FFFFFF', text: '#1E2A3A', muted: '#5B6472', border: '#E3E8EF', accent: '#3B6FD8',
+    background: '#F3F5F9', surface: '#FFFFFF', text: '#1E2A3A', muted: '#5B6472', border: '#E3E8EF', accent: '#3B6FD8', positive: '#15934F', negative: '#D23F3F',
     palette: ['#3B6FD8', '#10B981', '#F2B53A', '#E5605E', '#5AB4D6', '#8E62C9', '#F08A4B', '#2E9E83']
   },
   dark: {
-    background: '#14181F', surface: '#1E242D', text: '#E7EAF0', muted: '#8B95A4', border: '#2E3540', accent: '#7AA5F5',
+    background: '#14181F', surface: '#1E242D', text: '#E7EAF0', muted: '#8B95A4', border: '#2E3540', accent: '#7AA5F5', positive: '#10B981', negative: '#EE6666',
     palette: ['#5B8DEF', '#10B981', '#F2B53A', '#EE6666', '#73C0DE', '#B084DB', '#FC8452', '#3BA272']
   }
 };
@@ -59,7 +58,7 @@ export function resolveTheme(theme?: DashTheme): ResolvedTheme {
   const dark = t.mode === 'dark' || (t.mode === 'auto' && !!globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches);
   const base = BASE[dark ? 'dark' : 'light'];
   const r: ResolvedTheme = { ...base, mode: t.mode || 'light', font: t.font || FONT, radius: t.radius ?? 0, dark };
-  for (const k of ['background', 'surface', 'text', 'muted', 'border', 'accent'] as const) r[k] = t[k] || base[k];
+  for (const k of ['background', 'surface', 'text', 'muted', 'border', 'accent', 'positive', 'negative'] as const) r[k] = t[k] || base[k];
   if (t.palette?.length) r.palette = t.palette;
   return r;
 }

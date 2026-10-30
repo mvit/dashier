@@ -1,7 +1,7 @@
 import { dayFirst, toISODate } from './dates';
 import { NUMBER } from './data';
 import { payloadText } from './payloads';
-import { ColumnTable, columnsFromCSVAsync, columnsFromRows } from './columns';
+import { ColumnTable, columnsFromText } from './columns';
 import { DashDataSource, ColumnSchema, DataSourceFormat, FieldType } from '../types/model';
 
 type Row = Record<string, any>;
@@ -14,10 +14,26 @@ type Rows = Row[];
  * fields go there one by one (with their place in the record) instead: a record a million fields long (a column,
  * stored as one line) is never held as a whole, and a slice can end in its middle.
  */
+/**
+ * Where an unquoted field from `i` ends: at the next comma or line end (t.length: the end). Each is searched for again
+ * only once passed, so reading a whole text this way is linear however rare commas or line ends are.
+ */
+const fieldEnds = (t: string) => {
+  let c = -1, n = -1, r = -1;
+  const at = (p: number, ch: string, i: number) => (p >= i ? p : (p = t.indexOf(ch, i)) < 0 ? t.length : p);
+  return (i: number) => Math.min((c = at(c, ',', i)), (n = at(n, '\n', i)), (r = at(r, '\r', i)));
+};
+
 export function csvReader(text: string, onRecord: (fields: string[]) => void, onField?: (v: string, at: number) => void) {
   const t = text.trim();
-  let i = 0, row: string[] = [], val = '', quoted = false, k = 0;
-  const put = () => (onField ? onField(val.trim(), k++) : row.push(val.trim()), (val = ''));
+  // `val`: a quoted field's text so far (null: unquoted, read as t[a, i)); quoted text is copied in runs from `s`
+  let i = 0, row: string[] = [], val: string | null = null, quoted = false, k = 0, a = 0, s = 0, blank = true;
+  const end = fieldEnds(t);
+  const put = () => {
+    const v = (val ?? t.slice(a, i)).trim();
+    onField ? onField(v, k++) : row.push(v);
+    val = null;
+  };
   const endRow = () => {
     put();
     if (!onField && !(row.length === 1 && row[0] === '')) onRecord(row);
@@ -28,22 +44,25 @@ export function csvReader(text: string, onRecord: (fields: string[]) => void, on
     const until = performance.now() + ms;
     while (i < t.length) {
       for (const stop = Math.min(t.length, i + 65536); i < stop; i++) {
-        const c = t[i];
+        const c = t.charCodeAt(i);
         if (quoted) {
-          if (c !== '"') val += c;
-          else if (t[i + 1] === '"') (val += '"'), i++;
-          else quoted = false;
-        } else if (c === '"' && !val.trim()) quoted = true; // a quote opens a field only at its start: 5'10" is text
-        else if (c === ',') put();
-        else if (c === '\n' || c === '\r') {
-          if (c === '\r' && t[i + 1] === '\n') i++;
-          endRow();
-        } else val += c;
+          // "" is a quote: the run restarts at the second one
+          if (c === 34) (val += t.slice(s, i)), t.charCodeAt(i + 1) === 34 ? (s = ++i) : (quoted = false);
+        } else if (c === 34 && blank) (quoted = true), (val = t.slice(a, i)), (s = i + 1); // a quote opens a field only at its start: 5'10" is text
+        else if (c === 44) put(), (a = i + 1), (blank = true);
+        else if (c === 10 || c === 13) {
+          if (c === 13 && t.charCodeAt(i + 1) === 10) i++;
+          endRow(), (a = i + 1), (blank = true);
+        } else if (blank && c > 32) {
+          // an unquoted field (it starts with neither a quote nor a space): on to its end
+          i = end(i) - 1;
+          blank = false;
+        }
       }
       if (performance.now() > until) return false;
     }
-    // the last record (callers stop reading once it's done)
-    if (val || row.length || k) endRow();
+    if (quoted) (val += t.slice(s, i)), (quoted = false);
+    if (val != null || a < i || row.length || k) endRow();
     return true;
   };
   return { read, share: () => (t.length ? Math.min(1, i / t.length) : 1) };
@@ -57,6 +76,7 @@ export function csvHead(text: string, n: number): { head: string; total: number 
   const t = text.trim();
   let quoted = false, records = 0, cut = -1, start = true; // at a field's start (where a quote opens one)
   let filled = false; // the current record has content (blank lines aren't records)
+  const end = fieldEnds(t);
   for (let i = 0; i < t.length; i++) {
     const c = t.charCodeAt(i);
     if (quoted) c === 34 && (t.charCodeAt(i + 1) === 34 ? i++ : (quoted = false));
@@ -67,7 +87,8 @@ export function csvHead(text: string, n: number): { head: string; total: number 
       start = true;
       continue;
     } else if (c === 34 && start) quoted = true;
-    else if (c > 32) start = c === 44;
+    // past an unquoted field's first character nothing counts until its end (a quote opens a field only at its start)
+    else if (c > 32 && !(start = c === 44)) i = end(i) - 1;
     if (c > 32) filled = true;
   }
   if (filled) records++;
@@ -102,35 +123,57 @@ const csvCell = (v: string) => (/[",\r\n]/.test(v) || v !== v.trim() ? `"${v.rep
 /** A slice of work done: the page repaints before the next. */
 const pause = () => new Promise(r => setTimeout(r));
 
+/** What readColumns does with a table besides reading it. */
+export interface ColumnsRead {
+  /** Gets each column's name (as the text has it, `name` true), then its values, by column number. */
+  to?: (column: number, v: unknown, name: boolean) => void;
+  /** Keep the table as it is stored (false: read it only). */
+  store?: boolean;
+  /** Renames columns in what is stored. */
+  rename?: (name: string) => string;
+  /** The share of the text read so far (0–1), between slices. */
+  progress?: (share: number) => void;
+}
+
 /**
- * A table's text (CSV, JSON rows or columns) as columns: one CSV line per column, its name then its values, in row
- * order. Tables added or changed here are stored so (format "csv-columns"): a column's values side by side pack
- * smaller and read faster. `rename` renames columns. A big CSV is read a slice at a time.
+ * Reads a table's text (CSV, JSON rows or columns) once, a slice at a time (the page repaints in between), and returns
+ * it as it is stored, in pieces: a CSV line per column, its name then its values, in row order (a column's values
+ * side by side pack smaller and read faster). The pieces are never joined into one string: millions of rows would
+ * make one of hundreds of MB.
  */
-export async function columnsText(text: string, format: DataSourceFormat, rename = (n: string) => n): Promise<string> {
+export async function readColumns(text: string, format: DataSourceFormat, { to, store = true, rename = n => n, progress }: ColumnsRead = {}): Promise<string[]> {
   const done: string[][] = [], cells: string[][] = [];
   // a column's cells are joined 10,000 at a time: millions of small strings would cost more than the text
-  const put = (i: number, v: unknown) => {
+  const put = (i: number, v: unknown, name = false) => {
+    to?.(i, v, name);
+    if (!store) return;
     const c = (cells[i] ??= []);
-    c.push(csvCell(String(v ?? '')));
+    c.push(csvCell(String((name ? rename(v as string) : v) ?? '')));
     if (c.length > 9999) (done[i] ??= []).push(c.join(',')), (cells[i] = []);
   };
   if (format === 'json') {
     const rows = parseJSON(text), names = [...new Set(rows.flatMap(Object.keys))];
-    names.forEach((n, i) => put(i, rename(n)));
+    names.forEach((n, i) => put(i, n, true));
     for (const r of rows) names.forEach((n, i) => put(i, r[n]));
   } else {
     let header: string[] | null = null, col = -1;
     const reader = csvReader(
       text,
-      (r) => (header ? header.forEach((_, i) => put(i, r[i])) : (header = uniqueNames(r)).forEach((n, i) => put(i, rename(n)))),
-      format === 'csv' ? undefined : (v, at) => put(at ? col : ++col, at ? v : rename(v))
+      (r) => (header ? header.forEach((_, i) => put(i, r[i])) : (header = uniqueNames(r)).forEach((n, i) => put(i, n, true))),
+      format === 'csv' ? undefined : (v, at) => put(at ? col : ++col, v, !at)
     );
-    while (!reader.read(100)) await pause();
+    while (!reader.read(100)) progress?.(reader.share()), await pause();
   }
   // a column that just filled a chunk has no cells left over: no empty piece, which would read as one more blank value
-  return cells.map((c, i) => [...(done[i] ?? []), ...(c.length ? [c.join(',')] : [])].join(',')).filter(Boolean).join('\n');
+  return cells.flatMap((c, i) => {
+    const line = [...(done[i] ?? []), ...(c.length ? [c.join(',')] : [])].join(',');
+    return line ? [i ? '\n' : '', line] : [];
+  });
 }
+
+/** A table's text as it is stored (see readColumns), as one string; `rename` renames columns. */
+export const columnsText = async (text: string, format: DataSourceFormat, rename?: (n: string) => string) =>
+  (await readColumns(text, format, { rename })).join('');
 
 /** JSON array of row objects, or a columnar { column: [values] } object. */
 export function parseJSON(text: string): Rows {
@@ -193,9 +236,9 @@ export function inferStructure(rows: Rows): ColumnSchema[] {
 /** Where a load has got to: unpacking the stored data, then reading its rows (share 0–1, rows so far). */
 export type LoadStep = { step: 'unpack' } | { step: 'read'; share: number; rows: number };
 
-/** A table's text into typed columns: CSV (rows or columns) straight into columns a slice at a time, reporting progress; JSON via its row objects. */
+/** A table's text into typed columns, a slice at a time, reporting progress. */
 export const textToColumnsAsync = async (text: string, format: DataSourceFormat, structure: ColumnSchema[], progress: (s: LoadStep) => void): Promise<ColumnTable> =>
-  format === 'json' ? columnsFromRows(parseJSON(text), structure) : columnsFromCSVAsync(text, structure, (share, rows) => progress({ step: 'read', share, rows }), format === 'csv-columns');
+  (await columnsFromText(text, format, structure, (share, rows) => progress({ step: 'read', share, rows }))).table;
 
 /** Decompresses and parses one source (stored as columns) into columns, with its declared column types. */
 export async function hydrateSource(source: DashDataSource, progress: (s: LoadStep) => void = () => {}): Promise<ColumnTable> {

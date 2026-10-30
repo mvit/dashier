@@ -1,5 +1,5 @@
 import { Component, createSignal, Show } from 'solid-js';
-import { openMenuBelow } from './ContextMenu';
+import { MAC, MOD, openMenuBelow } from './ContextMenu';
 import { store } from '../runtime/store';
 import { Logo, RedoIcon, UndoIcon } from './icons';
 import { PasswordDialog } from './PasswordDialog';
@@ -52,7 +52,7 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
         <div class="ed-toast">✓ {notification()}</div>
       </Show>
       <Show when={asking()}>
-        <PasswordDialog confirm onSubmit={setPassword} onClose={() => setAsking(false)} />
+        <PasswordDialog confirm={store.encrypted() ? 'Change password' : 'Add a password'} onSubmit={setPassword} onClose={() => setAsking(false)} />
       </Show>
       {/* an encrypted JSON just opened (older exports): its password, as when opening the file; Cancel goes back to the report before */}
       <Show when={store.locked()}>
@@ -77,8 +77,8 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
 
       <div class="ed-group ed-group-right">
         <div class="ed-btn-cluster">
-          <button class="ed-btn ed-btn-icon" title="Undo (Ctrl+Z)" disabled={!store.canUndo()} onClick={() => store.undo()}><UndoIcon /></button>
-          <button class="ed-btn ed-btn-icon" title="Redo (Ctrl+Y)" disabled={!store.canRedo()} onClick={() => store.redo()}><RedoIcon /></button>
+          <button class="ed-btn ed-btn-icon" title={`Undo (${MOD}Z)`} disabled={!store.canUndo()} onClick={() => store.undo()}><UndoIcon /></button>
+          <button class="ed-btn ed-btn-icon" title={`Redo (${MAC ? '⇧⌘Z' : 'Ctrl+Y'})`} disabled={!store.canRedo()} onClick={() => store.redo()}><RedoIcon /></button>
         </div>
 
         <button class="ed-btn" title="See the report as a recipient will (Esc to return)" onClick={() => store.setPreview(true)}>
@@ -88,19 +88,24 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
         <button
           class="ed-btn ed-btn-primary"
           disabled={store.isSaving()}
-          title={store.isDirty() ? 'Unsaved changes (Ctrl+S saves)' : 'Saved'}
+          title={store.isDirty() ? `Unsaved changes (${MOD}S saves)` : 'Saved'}
           onClick={(e) =>
             openMenuBelow(e, [
-              { label: 'Save', kbd: 'Ctrl+S', onSelect: () => save() },
-              { label: 'Save a copy…', onSelect: () => save(true) },
-              { label: 'Print…', kbd: 'Ctrl+P', onSelect: () => store.print() },
+              // the file, then printing; its password; the report as JSON, the hand-over format (to people and agents)
+              { label: 'Save', kbd: `${MOD}S`, onSelect: () => save() },
+              { label: 'Save as…', hint: 'Save to a new file, and keep working in it', onSelect: () => save(true) },
+              { label: 'Print…', kbd: `${MOD}P`, hint: 'Every page, one per sheet. To make a PDF, choose Save as PDF in the print dialog', onSelect: () => store.print() },
               '-',
-              { label: 'Encrypt with password…', onSelect: () => setAsking(true) },
-              { label: 'Remove encryption', disabled: !store.encrypted(), onSelect: () => setPassword(null) },
+              ...(store.encrypted()
+                ? [
+                    { label: 'Change password…', onSelect: () => setAsking(true) },
+                    { label: 'Remove password', hint: 'Save the data readable again: anyone with the file can open it', onSelect: () => setPassword(null) }
+                  ]
+                : [{ label: 'Add a password…', hint: 'Encrypt the data in the file: it opens only with the password', onSelect: () => setAsking(true) }]),
               '-',
               // from an encrypted report the JSON is readable: App warns first
-              { label: 'Export JSON', onSelect: () => (store.encrypted() ? props.onExportJSON() : store.exportJSON()) },
-              { label: 'Open JSON…', onSelect: openJSON }
+              { label: 'Export as JSON', hint: 'The whole report, data included and readable: for agents and other tools', onSelect: () => (store.encrypted() ? props.onExportJSON() : store.exportJSON()) },
+              { label: 'Replace with JSON…', hint: "Open a report's JSON in place of this one (Undo brings this one back)", onSelect: openJSON }
             ])
           }
         >

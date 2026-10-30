@@ -1,3 +1,4 @@
+import { clone } from '../runtime/data';
 import { Component, For, Show, createMemo } from 'solid-js';
 import { store } from '../runtime/store';
 import { templateVariables } from '../runtime/template';
@@ -40,7 +41,7 @@ export const TemplateSlots: Component<{ element: any; set: (prop: string, val: a
   const items = (name: string): WellItem[] => {
     const b: DataBinding | undefined = props.element.bindings?.[name];
     if (!b) return [];
-    const patch = (p: Partial<DataBinding>) => bind(name, JSON.parse(JSON.stringify({ ...b, ...p })));
+    const patch = (p: Partial<DataBinding>) => bind(name, clone({ ...b, ...p }));
     const format = formatSection(b.format, (f) => patch({ format: f }));
     const units = unitsSection(b.units, (u) => patch({ units: u }));
     // a single value can show its comparison instead ("+6.4%"), against another value of the text box's filters
@@ -73,7 +74,7 @@ export const TemplateSlots: Component<{ element: any; set: (prop: string, val: a
           {(name) => {
             const source = () => store.variableSource(props.element, name);
             return (
-              <FieldWell label={<code>{name}</code>} items={items(name)} onDropField={(f) => bind(name, bindingFor(f))} warn={source().kind === 'unbound'}>
+              <FieldWell label={<code>{name}</code>} items={items(name)} onDropField={(f) => bind(name, bindingFor(f))} warn={source().kind === 'unbound'} tables>
                 {source().kind === 'auto' ? <span class="d-well-auto">{source().label}</span> : undefined}
               </FieldWell>
             );

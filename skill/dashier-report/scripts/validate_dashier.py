@@ -4,14 +4,17 @@ Checks a Dashier report against the dashier-reports skill: the data model, every
 slicer values against the data, text box templates, and the grid. Usage: python3 validate_dashier.py report.html   (exit 0 = no FAIL)
 
 Optional: --render opens every page in headless Chromium and fails a visual that renders empty ("No data for these
-fields", a card showing "-"). It needs Playwright for Python (pip install playwright; python3 -m playwright install
+fields", a card showing a dash, "—"). It needs Playwright for Python (pip install playwright; python3 -m playwright install
 chromium, or CHROME_PATH=<a Chrome or Edge>), so it is opt-in.
 
 FAIL lines are defects (a visual that will be empty or wrong, a model that inflates or drops rows).
 WARN lines are judgment calls: fix them unless the report has a stated reason not to.
 """
-import base64, csv, gzip, io, itertools, json, os, re, sys
+import json, os, re, sys
 from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dashier_data import ISO_DATE, NUM, NUMERIC, cell, date_part, day_first, js_str, key_text, number, to_iso, unpack
 
 args = [a for a in sys.argv[1:] if a != '--render']
 html = open(args[0], encoding='utf-8').read()
@@ -32,11 +35,10 @@ AGG = {'sum', 'avg', 'count', 'distinct', 'min', 'max', 'median', 'mode', 'first
 FMT = {'number', 'integer', 'currency', 'percent'}
 UNITS = {'auto', 'thousands', 'millions', 'billions'}
 CHARTS = {'bar', 'hbar', 'line', 'area', 'combo', 'scatter', 'pie', 'donut', 'radar', 'treemap', 'sankey', 'gauge'}
-NUM = re.compile(r'^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$')
-ISO = re.compile(r'^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$')
 
 # --- tables -------------------------------------------------------------------------------------------------
-cols, data = {}, {}
+# data[t]: each stored column's values (as the app reads them: a column at a time, trimmed); types[t]: declared types
+cols, data, types = {}, {}, {}
 if doc.get('encryption'):
     W('the data is encrypted with a password: checks that need the rows (values, keys, filters) are skipped')
 for t, s in src.items():
@@ -44,34 +46,34 @@ for t, s in src.items():
         F(f'table "{t}": no dots or brackets in table names ("table.field" and "[measure]" refs would be ambiguous)')
     names = [c['name'] for c in s.get('structure') or []]
     cols[t] = set(names)
-    types = {c['name']: c.get('type') for c in s.get('structure') or []}
+    types[t] = {c['name']: c.get('type') for c in s.get('structure') or []}
     for n in names:
         if '.' in n or '[' in n or ']' in n:
             F(f'{t}.{n}: no dots or brackets in column names')
     if doc.get('encryption'):
         continue
     try:
-        text = gzip.decompress(base64.b64decode(s['payload'])).decode('utf-8-sig')
+        pairs = unpack(s['payload'])
     except Exception as e:
         F(f'{t}: payload is not gzip+base64 ({e})')
         continue
-    if s.get('format') != 'csv-columns':
-        F(f"{t}: format {s.get('format')!r}: tables are stored as csv-columns (build_report.py writes them)")
-        continue
-    # a line per column: its name, then its values
-    lines = [list(r) for r in itertools.zip_longest(*(r for r in csv.reader(io.StringIO(text)) if r), fillvalue='')]
-    header = lines[0] if lines else []
-    rows = [dict(zip(header, r)) for r in lines[1:]]
+    header = [n for n, _ in pairs]
     if header != names:
         (F if set(header) != set(names) else W)(f'{t}: structure {names} does not match the stored columns {header}')
-    data[t] = rows
-    for n, ty in types.items():
-        vals = [str(r.get(n) if r.get(n) is not None else '').strip() for r in rows]
-        bad = [v for v in vals if v and ((ty in ('int', 'uint', 'float') and not NUM.match(v)) or (ty == 'boolean' and v.lower() not in ('true', 'false')))]
-        if bad:
+    data[t] = dict(pairs)
+    for n, ty in types[t].items():
+        vals = data[t].get(n, [])
+        if ty in NUMERIC and (bad := [v for v in vals if v and number(v) is None]):
             F(f'{t}.{n} is {ty} but holds {bad[:3]}: these load as blank (plain numbers only: no $, %, or thousands commas)')
-        if ty == 'datetime' and any(v and not ISO.match(v) for v in vals):
-            W(f'{t}.{n}: write dates as ISO yyyy-mm-dd')
+        if ty == 'boolean' and (bad := [v for v in vals if v and v.lower() not in ('true', 'false', '1', '0', 'yes', 'no')]):
+            F(f'{t}.{n} is boolean but holds {bad[:3]}: these load as false (true, 1 and yes are true)')
+        if ty == 'datetime':
+            first = day_first(vals)
+            # each distinct text read once, as the app reads a date column
+            if bad := [v for v in set(vals) if v and not to_iso(v, first)]:
+                F(f'{t}.{n} is datetime but holds {bad[:3]}: these load as blank (write dates as ISO yyyy-mm-dd)')
+            elif any(v and not ISO_DATE.match(v) for v in vals):
+                W(f'{t}.{n}: write dates as ISO yyyy-mm-dd')
         # years, ids and codes are labels: text keeps them out of sums and range slicers
         if ty == 'string' and any(vals) and all(NUM.match(v) for v in vals if v) and not re.search(r'year|id$|key|code|zip|postal|phone|fy', n, re.I) and not any(re.match(r'^0\d', v) for v in vals):
             W(f'{t}.{n} holds only numbers but is typed string')
@@ -79,11 +81,36 @@ for t, s_ in src.items():
     for c in s_.get('structure') or []:
         if c.get('sortBy') and c['sortBy'] not in cols[t]:
             F(f'{t}.{c["name"]}: sortBy names {c["sortBy"]}, which {t} does not have')
+_cells, _keys = {}, {}
+
+
+def held_cells(t, n):
+    """Column n of table t as the app holds its values, written as text (dashier_data.cell): what filters compare."""
+    if (t, n) not in _cells:
+        ty, vals = types[t].get(n), data[t].get(n, [])
+        first = ty == 'datetime' and day_first(vals)
+        if ty == 'datetime':  # each distinct date read once
+            iso = {v: cell(v, ty, first) for v in set(vals)}
+            _cells[(t, n)] = [iso[v] for v in vals]
+        else:
+            _cells[(t, n)] = [cell(v, ty, first) for v in vals]
+    return _cells[(t, n)]
+
+
+def key_cells(t, n):
+    """Column n of table t as relationship keys compare it (numbers by value, text ignoring case)."""
+    if (t, n) not in _keys:
+        ty = types[t].get(n)
+        # a date keys as its ISO text does (held_cells reads each distinct date once)
+        _keys[(t, n)] = [key_text(v, 'string') for v in held_cells(t, n)] if ty == 'datetime' else [key_text(v, ty) for v in data[t].get(n, [])]
+    return _keys[(t, n)]
+
+
 seen = {}
 for t, c in cols.items():
     k = frozenset(c)
     if k in seen:
-        rows_of = lambda x: {tuple(sorted((n, str(v)) for n, v in r.items())) for r in data.get(x, [])}
+        rows_of = lambda x: set(zip(*(data[x].get(n, []) for n in sorted(cols[x])))) if x in data else set()
         if rows_of(seen[k]) & rows_of(t):
             F(f'{seen[k]} and {t} hold the same rows: the same data twice')
         else:
@@ -104,29 +131,14 @@ dims = [t for t in src if t.startswith('dim')]
 if len(src) > 1 and (not facts or not dims):
     W('name tables fact_* (events, numbers) and dim_* (things that filter and group them)')
 
-def text_of(v, numeric):
-    """A cell or filter value as the app compares it: numbers by value (1.50 is "1.5"), text as written."""
-    s = str(v if v is not None else '').strip()
-    if numeric and NUM.match(s):
-        f = float(s)
-        return str(int(f)) if f.is_integer() else repr(f)
-    return s
-
-
-def bucket(v, part):
-    """A date as the app buckets it for a date part: 2024, 2024 Q1, 2024-01, 2024-01-31 (picks must match exactly)."""
-    s = str(v if v is not None else '').strip()
-    m = re.match(r'(\d{4})-(\d\d)', s)
-    return s if not m else m[1] if part == 'year' else f'{m[1]} Q{(int(m[2]) + 2) // 3}' if part == 'quarter' else s[:7 if part == 'month' else 10]
-
-
-def check_values(where, t, field, values, part=None):
-    """Values that match no row: a filter, slicer pick or measure where on them shows nothing."""
+def check_values(where, t, field, values, part=None, key=False):
+    """Values that match no row, compared as the app compares them: a cell as it holds it (1.5 for "1.50", an ISO date)
+    with the value as written, a date by its bucket (2024 Q1), a key ignoring case. A filter, slicer pick or measure
+    where on values that match nothing shows nothing."""
     if t not in data or not values:
         return
-    numeric = not part and next((c.get('type') for c in src[t].get('structure') or [] if c['name'] == field), '') in ('int', 'uint', 'float')
-    have = {bucket(r.get(field), part) if part else text_of(r.get(field), numeric) for r in data[t]}
-    miss = [v for v in values if text_of(v, numeric) not in have]
+    have = set(key_cells(t, field)) if key else {date_part(c, part) for c in held_cells(t, field)} if part else set(held_cells(t, field))
+    miss = [v for v in values if (key_text(js_str(v), 'string') if key else js_str(v)) not in have]
     if miss:
         (W if len(miss) < len(values) else F)(f'{where}: {t}.{field} has no {miss[:5]}' + ('' if len(miss) < len(values) else ': it shows nothing'))
 
@@ -158,12 +170,12 @@ for i, r in enumerate(rels):
     if r.get('cardinality') not in (None, 'many-to-one', 'one-to-one', 'many-to-many'):
         F(f'relationship {ta}->{tb}: cardinality is many-to-one, one-to-one or many-to-many')
     if tb in data and ta in data and tb not in facts and r.get('cardinality') != 'many-to-many':
-        keys = [str(row.get(b['field'], '')).strip() for row in data[tb]]
-        dup = [k for k, n in Counter(keys).items() if n > 1]
+        # keys as the app matches them: 2024 = 2024.0, s1 = S1; a blank key matches nothing
+        dup = [k for k, n in Counter(key_cells(tb, b['field'])).items() if n > 1 and k]
         if dup:
             W(f'{tb}.{b["field"]} is the "one" side but repeats {dup[:3]}: rows match the first copy only; fix the data')
-        known = set(keys)
-        miss = sorted({str(row.get(a['field'], '')).strip() for row in data[ta]} - known - {''})
+        known = set(key_cells(tb, b['field']))
+        miss = sorted({v for v, k in zip(data[ta].get(a['field'], []), key_cells(ta, a['field'])) if k and k not in known})
         if miss:
             W(f'{ta}.{a["field"]} values missing from {tb}.{b["field"]}: {miss[:5]} (they show as (Blank))')
 for p, n in pairs.items():
@@ -183,11 +195,13 @@ for r in rels:
     a, b = r.get('from') or {}, r.get('to') or {}
     if a.get('table') not in data or b.get('table') not in data:
         continue
-    lookup = {str(row.get(b.get('field'), '')).strip(): row for row in data[b['table']]}
+    dim = data[b['table']]
+    lookup = {}  # a key's first row in the dimension
+    for i, k in enumerate(dim.get(b.get('field'), [])):
+        lookup.setdefault(k, i)
     years = []  # each year in the order the fact first mentions it, from the key or its dimension row
-    for row in data[a['table']]:
-        key = str(row.get(a.get('field'), '')).strip()
-        m = YEAR.search(key) or next((YEAR.search(str(v)) for v in (lookup.get(key) or {}).values() if YEAR.search(str(v))), None)
+    for key in dict.fromkeys(data[a['table']].get(a.get('field'), [])):  # each key once, in first-seen order
+        m = YEAR.search(key) or next((y for col in dim.values() if key in lookup and (y := YEAR.search(col[lookup[key]]))), None)
         if m and m.group() not in years:
             years.append(m.group())
     sorted_dim = any(c.get('sortBy') for c in src[b['table']].get('structure') or [])
@@ -282,7 +296,7 @@ def check_ref(where, home, ref):
 def distinct(home, ref):
     """The distinct values of a column a visual on `home` reads (its own or "table.field"); none for measures."""
     t, n = (home, ref) if home in cols and ref in cols[home] else next(((t, ref[len(t) + 1:]) for t in sorted(src, key=len, reverse=True) if ref.startswith(t + '.')), (None, None))
-    return {str(r.get(n)) for r in data.get(t, [])} if t else set()
+    return set(data.get(t, {}).get(n, [])) if t else set()
 
 
 def check_value(where, d, axis=True):
@@ -308,7 +322,7 @@ def check_filters(where, fs):
         elif t not in src or f.get('field') not in cols[t]:
             F(f'{where}: filter {t}.{f.get("field")} does not exist')
         else:
-            check_values(where, t, f['field'], f.get('values'), f.get('datePart'))
+            check_values(where, t, f['field'], f.get('values'), f.get('datePart'), f.get('match') == 'key')
 
 
 TEMPLATE_FILTERS = {'upper', 'lower', 'title', 'truncate', 'round', 'format', 'date', 'default', 'join', 'first', 'last', 'size', 'length', 'sort', 'reverse'}
@@ -507,6 +521,8 @@ if '--render' in sys.argv:
             for p in pages:
                 page = browser.new_page(viewport={'width': 1600, 'height': 1000})
                 page.goto(f'{url}#preview,{p.get("id")}')
+                # the splash stays until every table is read (a big one takes seconds): before that, cards show a dash
+                page.wait_for_selector('#d-splash', state='detached', timeout=300000)
                 page.wait_for_selector('.d-visual-container, .d-chart-empty', timeout=30000)
                 page.wait_for_timeout(1500)  # charts draw at their tile's size
                 for eid, what in page.eval_on_selector_all('.d-visual-container', """els => els.map(e => [e.dataset.id,

@@ -44,14 +44,14 @@
     a row first, then the other visuals in reading order, slicers in a drawer; it grows taller to fit),
     sources:{<id>:Source}, pages:[Page], filters?:[Filter] (every page), relationships?:[Relationship],
     measures?:[Measure], encryption?:Encryption }
-  Source   { format:"csv-columns", encoding:"gzip+base64", structure:[{name, type, sortBy?}], payload }
+  Source   { structure:[{name, type, sortBy?}], payload }
     type: string|float|int|uint|datetime|boolean (datetime: ISO "2024-01-03[T14:05]", also 1/3/2024, "Jan 3, 2024").
     sortBy: another column whose values order this one's (month names by month number) on axes, legends, matrices,
     slicers. payload = base64(gzip(CSV with a line per column: its name, then its values)). In Python, rows (header first):
     rows = list(zip(*csv.reader(io.StringIO(gzip.decompress(base64.b64decode(payload)).decode())))); back: f = io.StringIO();
     csv.writer(f).writerows(zip(*rows)); payload = base64.b64encode(gzip.compress(f.getvalue().encode())).decode()
   Encryption { version:1, kdf:"PBKDF2-SHA256", iterations, salt, iv, ciphertext }: only in a file saved with a
-    password (Share > Encrypt with password...). Then every payload is "" and the tables are AES-256-GCM encrypted in
+    password (Share > Add a password...). Then every payload is "" and the tables are AES-256-GCM encrypted in
     ciphertext (base64), with a key from PBKDF2-SHA256(password, salt); the file asks for the password on opening.
     Without the password the data can't be read; edit the rest of the document as usual and keep encryption as is.
   Relationship { from:{table, field}, to:{table, field}, cardinality?, crossFilter?:"both" }: from = a fact (many side),
@@ -121,7 +121,8 @@
   Filter   { field, table, values?:["…"] | min?, max? | from?, to? (ISO, inclusive) | last:{n, unit:"day"|"week"|"month"|
     "year"} | values + datePart ("2024 Q1") }. Reaches other tables through relationships; empty values = all.
   Theme    report only: { mode:"light"|"dark"|"auto", background, surface (tiles), text, muted, border, accent,
-    palette:[8 colors], font, radius }
+    positive / negative (a comparison's good and bad news; negative also colors a visual's error), palette:[8 colors],
+    font, radius }
   -->
 
   <script type="application/dashier+json" id="dashier-doc">
@@ -131,8 +132,8 @@
  "title": "Dashier tutorial",
  "theme": {"mode": "light"},
  "sources": {
-  "sales": {"format": "csv-columns", "encoding": "gzip+base64", "structure": [{"name": "date", "type": "datetime"}, {"name": "region", "type": "string"}, {"name": "category", "type": "string"}, {"name": "revenue", "type": "float"}, {"name": "units", "type": "uint"}], "payload": "H4sIAAAAAAAC/+2WTW5USwyF51lLIVXZ9WMv4EmMmDBgHEHDyySROh0Qu+c71UICNpAr6Ci6clfZx8fH9tX9dH85Fas23tTG/2ubdgDTD2D2A5jjAOY8gLkOYMYBzHx9s9UDmO0Apr2meXc+fXl4eizvns6X/397vn96+eP53/3z5ZfHh9NvjxvCDeGvQ7j7yDfVl6fz9/L2/vzp2/35RNTny9U4nb8+fDw9365uV7er29U/dcV3w9fT48uptBzDirewVtoIq6X1PrKY9TVLjumlLU8Ohs0srfkygjgiqE7cvfVZrNnqxbsLxqcvnt4G50OQdSk2t+dqAaZNN5LUXMVideGs4NazRfE6qojkBGdOEKyONUpaBiZsodNzKPkgCLJOEMwBzsYHUu8NOgYtYDwntfWAjgVpG2AAR6/Ezn1iaQ7ZSEhFQqR5pxQbC8oOP3ymDUiNDKkzKtlbja7SjecaS0UEmC1DHNJn7LK47TUafGoNyYl/W3VnnNlL5mjSQmXFUs2dWpSEFri7giZEBeOjeECdE5Th6QuYbh2fmh1SMYUWK3ZZ+NNJ9Wa4yhq1Q98jUDnMUk2vu6xJlJt8qsEBxaHmtePfaAg4XpGKIhYnc0keWhOSh9s2Y3cLhfEchg05tSu4ZTIqnPuSwF7JBR8nVw/aQlpGDsElasSejIa/U4A4m3J1B81z5woya5JofveeTSex0CqZpN5S38i2VHsFTpPKvDJ9Q42SVnBGYUUxApng99EaVW9PBodm9jlBYEGWOPOnXmigRqg7k4/wXbuya5q9LpB73dMcs867l8eHyzOcIU8ZZMWVVjAcEka/vHS1VW2AARCshlTHmzPTmYrnTE3dRZSxlHzjCZUt3SAavFFUobZvXN20vduNxSEtC2Ia5bHhuoa6aIHyCkdcajevyWKT0oq07SftYvtJlbnxNF3bj9UwzUUWvU6EvK54+bPcvllB3FLLp7x7AsDreqPsclFaS4YseuNoTYomT7OsgVU3th+3aT/zahuiTPVfb4prbO5YeibetfDbNXut7PcUZ1cNxHFtLkiPH4p57Nu9MztW6o6tJJq61tZ2tqp6734A5xK0MbcTAAA="},
-  "regions": {"format": "csv-columns", "encoding": "gzip+base64", "structure": [{"name": "region", "type": "string"}, {"name": "manager", "type": "string"}, {"name": "target", "type": "float"}], "payload": "H4sIAAAAAAAC/yXFOw6DMBBF0d6r8AJegYuAUkYRHfkoFKmnmBiL2CONB9YPglPcqxyTFDxFbcIoy96equHL1VymQpEVt5X8m4z/GJZU/Ucyq+DByd8nLhgp+9dMP1FnpJENIVyaHbr22PVcaA5uA9hwixp0AAAA"}
+  "sales": {"structure": [{"name": "date", "type": "datetime"}, {"name": "region", "type": "string"}, {"name": "category", "type": "string"}, {"name": "revenue", "type": "float"}, {"name": "units", "type": "uint"}], "payload": "H4sIAAAAAAAC/+2WTW5USwyF51lLIVXZ9WMv4EmMmDBgHEHDyySROh0Qu+c71UICNpAr6Ci6clfZx8fH9tX9dH85Fas23tTG/2ubdgDTD2D2A5jjAOY8gLkOYMYBzHx9s9UDmO0Apr2meXc+fXl4eizvns6X/397vn96+eP53/3z5ZfHh9NvjxvCDeGvQ7j7yDfVl6fz9/L2/vzp2/35RNTny9U4nb8+fDw9365uV7er29U/dcV3w9fT48uptBzDirewVtoIq6X1PrKY9TVLjumlLU8Ohs0srfkygjgiqE7cvfVZrNnqxbsLxqcvnt4G50OQdSk2t+dqAaZNN5LUXMVideGs4NazRfE6qojkBGdOEKyONUpaBiZsodNzKPkgCLJOEMwBzsYHUu8NOgYtYDwntfWAjgVpG2AAR6/Ezn1iaQ7ZSEhFQqR5pxQbC8oOP3ymDUiNDKkzKtlbja7SjecaS0UEmC1DHNJn7LK47TUafGoNyYl/W3VnnNlL5mjSQmXFUs2dWpSEFri7giZEBeOjeECdE5Th6QuYbh2fmh1SMYUWK3ZZ+NNJ9Wa4yhq1Q98jUDnMUk2vu6xJlJt8qsEBxaHmtePfaAg4XpGKIhYnc0keWhOSh9s2Y3cLhfEchg05tSu4ZTIqnPuSwF7JBR8nVw/aQlpGDsElasSejIa/U4A4m3J1B81z5woya5JofveeTSex0CqZpN5S38i2VHsFTpPKvDJ9Q42SVnBGYUUxApng99EaVW9PBodm9jlBYEGWOPOnXmigRqg7k4/wXbuya5q9LpB73dMcs867l8eHyzOcIU8ZZMWVVjAcEka/vHS1VW2AARCshlTHmzPTmYrnTE3dRZSxlHzjCZUt3SAavFFUobZvXN20vduNxSEtC2Ia5bHhuoa6aIHyCkdcajevyWKT0oq07SftYvtJlbnxNF3bj9UwzUUWvU6EvK54+bPcvllB3FLLp7x7AsDreqPsclFaS4YseuNoTYomT7OsgVU3th+3aT/zahuiTPVfb4prbO5YeibetfDbNXut7PcUZ1cNxHFtLkiPH4p57Nu9MztW6o6tJJq61tZ2tqp6734A5xK0MbcTAAA="},
+  "regions": {"structure": [{"name": "region", "type": "string"}, {"name": "manager", "type": "string"}, {"name": "target", "type": "float"}], "payload": "H4sIAAAAAAAC/yXFOw6DMBBF0d6r8AJegYuAUkYRHfkoFKmnmBiL2CONB9YPglPcqxyTFDxFbcIoy96equHL1VymQpEVt5X8m4z/GJZU/Ucyq+DByd8nLhgp+9dMP1FnpJENIVyaHbr22PVcaA5uA9hwixp0AAAA"}
  },
  "relationships": [
   {"from": {"table": "sales", "field": "region"}, "to": {"table": "regions", "field": "region"}}

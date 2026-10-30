@@ -5,6 +5,7 @@ import { aggregateValue, pct, summarizeValue, withUnits } from '../../runtime/ch
 import { sortOrder } from '../../runtime/data';
 import { datePartKey, datePartLabel } from '../../runtime/dates';
 import { Frame, frameFields, reader, subset } from '../../runtime/frames';
+import { empty } from './CardWidget';
 import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, fullText, gridLook, rangeOf, rowHeight, summaryHeader } from './tableKit';
 
 type Row = Record<string, any>;
@@ -17,6 +18,14 @@ const nothing: Read = () => undefined;
  * What the table and the matrix draw in: a title, then a scrolling table of fixed column widths (in ch) whose
  * body holds only the rows in view (`children`), between spacers as tall as the rows scrolled past.
  */
+/** A header cell that sorts by `k` when clicked (`on` false: it doesn't sort), showing the sort's arrow. */
+export const SortTh: Component<{ sort: ReturnType<typeof createSort<number>>; k: number; on?: boolean; class?: string; colSpan?: number; rowSpan?: number; children: JSX.Element }> = (p) => (
+  <th class={p.class} colSpan={p.colSpan} rowSpan={p.rowSpan} onClick={() => p.on !== false && p.sort.toggle(p.k)}>
+    {p.children}
+    <span class="sort-icon">{p.on !== false ? p.sort.arrow(p.k) : ''}</span>
+  </th>
+);
+
 export const TableShell: Component<{ title?: string; show: unknown; class: string; grid?: GridStyle; widths: number[]; virtual: ReturnType<typeof createVirtualRows>; head: JSX.Element; foot: JSX.Element; children: JSX.Element }> = (props) => {
   const spacer = (h: () => number) => (
     <Show when={h() > 0}>
@@ -30,7 +39,7 @@ export const TableShell: Component<{ title?: string; show: unknown; class: strin
       <Show when={props.title}>
         <div class="chart-title">{props.title}</div>
       </Show>
-      <Show when={props.show} fallback={<div class="d-chart-empty">{store.editing() ? 'Drag fields here' : ''}</div>}>
+      <Show when={props.show} fallback={empty('Drag fields here')}>
         <div class="table-container" ref={props.virtual.track} onScroll={props.virtual.measure}>
           <table class={props.class} style={{ width: `max(100%, ${props.widths.reduce((a, b) => a + b, 0)}ch)` }}>
             <colgroup>
@@ -55,7 +64,7 @@ export const TableShell: Component<{ title?: string; show: unknown; class: strin
  * sorts by header click, groups rows when a column is summarized, and ends with a totals row.
  */
 export const TableWidget: Component<{ element: TableElement }> = (props) => {
-  const { sort, toggle, arrow } = createSort<number>();
+  const sorter = createSort<number>(), { sort } = sorter;
   const el = () => props.element;
 
   const source = createMemo<Frame>(() => store.getFrame(el()));
@@ -170,10 +179,9 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
           <tr>
             <For each={columns()}>
               {(c, i) => (
-                <th class={align(c)} onClick={() => toggle(i())}>
+                <SortTh sort={sorter} k={i()} class={align(c)}>
                   {header(c)}
-                  <span class="sort-icon">{arrow(i())}</span>
-                </th>
+                </SortTh>
               )}
             </For>
           </tr>

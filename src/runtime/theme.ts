@@ -18,6 +18,8 @@ export function reportStyle(t: ResolvedTheme): Record<string, string> {
     '--line': t.border,
     '--chrome-2': mix(6),
     '--accent': t.accent,
+    '--r-positive': t.positive,
+    '--r-negative': t.negative,
     '--gridline': mix(12),
     'font-family': t.font
   };

@@ -1,10 +1,16 @@
 import { Component, For, Show, createSignal, onCleanup } from 'solid-js';
 
+/** Shortcuts as the viewer's keyboard writes them: ⌘S on a Mac, iPhone or iPad, Ctrl+S elsewhere. */
+export const MAC = /Mac|iP(hone|ad|od)/.test(navigator.userAgent);
+export const MOD = MAC ? '⌘' : 'Ctrl+';
+
 export interface MenuItem {
   label: string;
   onSelect: () => void;
   /** Shortcut shown on the right. */
   kbd?: string;
+  /** What the item does, on hover. */
+  hint?: string;
   danger?: boolean;
   disabled?: boolean;
 }
@@ -70,7 +76,7 @@ export const ContextMenuHost: Component = () => {
               item === '-' ? (
                 <hr />
               ) : (
-                <button class={item.danger ? 'danger' : ''} disabled={item.disabled} onClick={() => (setMenu(null), item.onSelect())}>
+                <button class={item.danger ? 'danger' : ''} title={item.hint} disabled={item.disabled} onClick={() => (setMenu(null), item.onSelect())}>
                   <span>{item.label}</span>
                   {item.kbd && <kbd>{item.kbd}</kbd>}
                 </button>

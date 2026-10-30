@@ -1,26 +1,44 @@
+import { createSignal } from 'solid-js';
+
 /**
  * Table payloads. In the file a payload is base64(gzip(CSV|JSON)). In memory it is bytes in a Blob, which the
  * browser keeps outside the JavaScript heap (a 2M-row table's payload is ~200 MB), and the document holds a short
  * reference instead ("@gzip:3"), so undo snapshots never copy data either. Saving writes the base64 back in
- * pieces, never as one huge string.
+ * pieces, never as one huge string. New data is gzipped in the background (seconds for millions of rows): until
+ * then its reference holds the promise of the bytes, and its text is kept as it is (`raw`).
  */
 
 const REF = '@gzip:';
-const held = new Map<string, Blob>();
+const held = new Map<string, Blob | Promise<Blob>>();
+const raw = new Map<string, Blob>();
 let next = 0;
+/** Bumped as background gzips finish (so a size on show updates). */
+const [gzipped, setGzipped] = createSignal(0);
 
 /** True for an in-memory reference (as opposed to base64 text, e.g. straight from a file). */
 export const isHeld = (payload: string) => payload.startsWith(REF) && held.has(payload);
 
-/** Keeps bytes in memory; returns their reference. */
-export const hold = (blob: Blob) => {
+/** Keeps bytes (or their promise) in memory; returns their reference. */
+export const hold = (blob: Blob | Promise<Blob>) => {
   const ref = REF + ++next;
   held.set(ref, blob);
   return ref;
 };
 
 /** Forgets a reference's bytes (a save's ciphertext, once written). */
-export const release = (ref: string) => held.delete(ref);
+export const release = (ref: string) => (raw.delete(ref), held.delete(ref));
+
+const compress = (b: Blob) => new Response(b.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+let worker: string | undefined;
+/** Gzips in a worker, off the page's thread; on the page where a worker can't run. */
+const gzip = (b: Blob) =>
+  new Promise<Blob>((done, fail) => {
+    // the worker runs `compress` itself (it only uses what a worker has)
+    const w = new Worker((worker ??= URL.createObjectURL(new Blob([`onmessage=async e=>postMessage(await(${compress})(e.data))`]))));
+    w.onmessage = e => (w.terminate(), done(e.data));
+    w.onerror = e => (w.terminate(), fail(e));
+    w.postMessage(b);
+  }).catch(() => compress(b));
 
 /** base64 characters decoded per step: a multiple of 4. */
 const B64_CHUNK = 1 << 22;
@@ -52,25 +70,30 @@ export const decompressPayload = (payload: string) => gunzip(base64Stream(payloa
 /** Keeps base64 text from a file as in-memory bytes; returns its reference. */
 export const holdBase64 = async (b64: string) => hold(await decode(b64));
 
-
-/** Compresses new data into memory; returns its reference. */
-export const holdText = async (text: string) => hold(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob());
+/** Keeps new data (text, or its pieces) in memory, gzipped in the background; returns its reference. */
+export const holdText = (text: string | string[]) => {
+  const blob = new Blob(([] as string[]).concat(text));
+  const ref = hold(gzip(blob).then(gz => (raw.delete(ref), held.has(ref) && held.set(ref, gz), setGzipped(n => n + 1), gz)));
+  raw.set(ref, blob);
+  return ref;
+};
 
 /** A payload's gzip bytes (a reference or base64). */
-export const blobOf = async (payload: string) => held.get(payload) ?? decode(payload);
+export const blobOf = async (payload: string) => (await held.get(payload)) ?? decode(payload);
 
 /** The CSV/JSON text of a payload (a reference or base64). */
-export const payloadText = (payload: string) => gunzip(held.get(payload)?.stream() ?? base64Stream(payload));
+export const payloadText = async (payload: string) => raw.get(payload)?.text() ?? gunzip((await held.get(payload))?.stream() ?? base64Stream(payload));
 
-/** The payload's size in the saved file (base64 characters). */
+/** The payload's size in the saved file (base64 characters); NaN while it's being gzipped. */
 export function payloadSize(payload: string): number {
+  gzipped();
   const blob = held.get(payload);
-  return blob ? Math.ceil(blob.size / 3) * 4 : payload.length;
+  return blob instanceof Blob ? Math.ceil(blob.size / 3) * 4 : blob ? NaN : payload.length;
 }
 
 /** A payload as base64, in pieces (for writing it into a file). */
 async function base64Parts(payload: string): Promise<string[]> {
-  const blob = held.get(payload);
+  const blob = await held.get(payload);
   if (!blob) return [payload];
   const out: string[] = [];
   const step = 3 * (1 << 18); // ~768 KB of bytes at a time

@@ -23,12 +23,11 @@ const doc = JSON.parse(raw);
 check('format is "dashier"', doc.format === 'dashier', String(doc.format));
 check('has pages', Array.isArray(doc.pages) && doc.pages.length > 0, `${doc.pages.length} pages`);
 
-// 2. Data sources: gzip+base64 with an explicit structure manifest
+// 2. Data sources: a structure manifest and a payload (gzip+base64 columns), nothing else
 for (const [id, src] of Object.entries(doc.sources)) {
-  check(`source "${id}" is gzip+base64`, src.encoding === 'gzip+base64');
+  check(`source "${id}" is just structure and payload`, Object.keys(src).sort().join() === 'payload,structure', Object.keys(src).join());
   check(`source "${id}" has a structure manifest`, Array.isArray(src.structure) && src.structure.length > 0);
   const text = zlib.gunzipSync(Buffer.from(src.payload, 'base64')).toString('utf-8');
-  check(`source "${id}" is stored as columns`, src.format === 'csv-columns');
   // a line per column, its name first (the tutorial's names have no quotes or commas)
   const header = text.trim().split('\n').map(l => l.split(',')[0].trim());
   const names = src.structure.map(c => c.name);
@@ -76,6 +75,12 @@ if (js) {
   // the budget is the packed app alone (gzip + base85), not the document or the editing guide around it
   const BUDGET = 140 * 1024;
   check(`packed app within its ${BUDGET / 1024} KB budget`, js[1].length <= BUDGET, `${(js[1].length / 1024).toFixed(1)} KB`);
+  // the editor's classes are shortened (classes.mjs), the report's never: a rule on a part of the report names its classes as written
+  const sheet = JSON.parse(code.match(/s\.replaceSync\(("(?:[^"\\]|\\.)*")\)/)[1]);
+  const rules = sheet.match(/[^{}]+\{/g).map((r) => r.slice(0, -1));
+  const reportRules = rules.filter((r) => /\.(d-(chart|legend|slicer|matrix|markdown|tip|print|canvas-sheet|visual-container|visuals-grid)|card-|c-)/.test(r));
+  check('the report\'s CSS keeps its class names', reportRules.length > 20 && reportRules.every((r) => !/\._[0-9a-z]+\b/.test(r)), reportRules.find((r) => /\._[0-9a-z]+\b/.test(r)));
+  check('the editor\'s own classes are shortened', !/\.d-card-head\b|\.ed-topbar\b/.test(sheet) && /\._[0-9a-z]+/.test(sheet));
 }
 
 console.log(`\nfile size: ${(Buffer.byteLength(html) / 1024).toFixed(1)} KB`);

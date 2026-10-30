@@ -3,6 +3,8 @@ import { SlicerElement, isNumericType } from '../../types/model';
 import { store } from '../../runtime/store';
 import { datePartLabel } from '../../runtime/dates';
 import { ClearFilterIcon } from '../icons';
+import { Check, RangeInputs, Search } from '../ui';
+import { empty } from './CardWidget';
 
 /** A slicer: picking values here filters every other visual on the page. */
 export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
@@ -11,8 +13,9 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
   const options = createMemo(() => store.slicerOptions(el()));
   const type = () => store.refType(el().sourceId, el().field);
   const numeric = () => isNumericType(type());
-  // a date slicer without date grouping picks a from–to range; grouped dates list their years/quarters/months
-  const dateRange = () => type() === 'datetime' && !el().datePart;
+  // a date slicer picks a from–to range of dates without date grouping or when it's set to Between; grouped dates
+  // list their years, quarters or months
+  const dateRange = () => type() === 'datetime' && (!el().datePart || el().style === 'range');
   const show = (v: string) => datePartLabel(v, el().datePart);
   const style = () => (dateRange() ? 'dates' : el().style || (numeric() ? 'range' : 'list'));
   const sel = () => el().selection;
@@ -38,12 +41,6 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
   };
   const active = () => picked().length > 0 || sel()?.min != null || sel()?.max != null || !!(sel()?.from || sel()?.to);
 
-  const dateInput = (key: 'from' | 'to') => (
-    <input type="date" class="d-input" value={sel()?.[key] ?? ''} onChange={(e) => select({ ...sel(), [key]: e.currentTarget.value || undefined })} />
-  );
-  const boundInput = (key: 'min' | 'max') => (
-    <input type="number" class="d-input" placeholder={String(options()[key] ?? key)} value={sel()?.[key] ?? ''} onChange={(e) => setBound(key, e.currentTarget.value)} />
-  );
   const slider = (key: 'min' | 'max') => (
     <input type="range" min={options().min} max={options().max} step="any" value={sel()?.[key] ?? options()[key]} onChange={(e) => setBound(key, e.currentTarget.value)} />
   );
@@ -59,21 +56,13 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
         </Show>
       </div>
 
-      <Show when={el().field} fallback={<div class="d-chart-empty">{store.editing() ? 'Drag a field here' : ''}</div>}>
+      <Show when={el().field} fallback={empty('Drag a field here')}>
         <Show when={style() === 'dates'}>
-          <div class="d-slicer-range">
-            {dateInput('from')}
-            –
-            {dateInput('to')}
-          </div>
+          <RangeInputs type="date" change value={(i) => sel()?.[i ? 'to' : 'from']} set={(i, v) => select({ ...sel(), [i ? 'to' : 'from']: v || undefined })} />
         </Show>
 
         <Show when={style() === 'range'}>
-          <div class="d-slicer-range">
-            {boundInput('min')}
-            –
-            {boundInput('max')}
-          </div>
+          <RangeInputs type="number" change value={(i) => sel()?.[i ? 'max' : 'min']} placeholder={(i) => String(options()[i ? 'max' : 'min'] ?? '')} set={(i, v) => setBound(i ? 'max' : 'min', v)} />
           <Show when={options().min != null && options().max! > options().min!}>
             <div class="d-slicer-sliders">
               {slider('min')}
@@ -107,15 +96,14 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
 
         <Show when={style() === 'list'}>
           <Show when={options().values.length > 8}>
-            <input type="search" class="d-input d-slicer-search" placeholder="Search" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+            <Search class="d-input d-slicer-search" value={search()} set={setSearch} />
           </Show>
           <div class="d-slicer-list">
             <For each={shown().slice(0, 500)}>
               {(v) => (
-                <label class="d-checkbox-label">
-                  <input type={el().single ? 'radio' : 'checkbox'} checked={picked().includes(v)} onClick={() => toggle(v)} />
+                <Check radio={el().single} checked={picked().includes(v)} set={() => toggle(v)}>
                   {show(v)}
-                </label>
+                </Check>
               )}
             </For>
           </div>

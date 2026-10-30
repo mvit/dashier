@@ -17,7 +17,7 @@ export interface MenuSection {
   options: MenuOption[];
 }
 
-/** A field placed in a well: a pill whose ⌄ menu removes, renames, summarizes and formats it. */
+/** A field placed in a well: a pill whose ▾ menu removes, renames, summarizes and formats it. */
 export interface WellItem {
   key: string;
   label: string;
@@ -241,7 +241,7 @@ const Pill: Component<{ item: WellItem; well: symbol; index: number; onMove?: (f
         {...drag}
       >
         <span class="d-pill-label">{props.item.label}</span>
-        <span class="d-pill-caret">⌄</span>
+        <span class="d-pill-caret">▾</span>
         <button class="d-pill-x" title="Remove field" onClick={(e) => (e.stopPropagation(), props.item.onRemove())}>×</button>
       </div>
       <Show when={open()}>
@@ -265,12 +265,14 @@ export const FieldWell: Component<{
   /** Lets the user drag pills into a new order. */
   onReorder?: (from: number, to: number) => void;
   warn?: boolean;
+  /** Takes whole tables too (a text box's variables); other wells don't offer to. */
+  tables?: boolean;
   children?: JSX.Element;
 }> = (props) => {
   const [over, setOver] = createSignal(false);
   const well = Symbol();
   let taken: boolean | void;
-  const drop = dropProps((f) => (taken = props.onDropField(f)), setOver);
+  const drop = dropProps((f) => (taken = props.onDropField(f)), setOver, props.tables);
   const onDrop = (e: DragEvent) => {
     const from = moving;
     moving = null;

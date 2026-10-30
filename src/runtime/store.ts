@@ -24,13 +24,13 @@ import {
 } from '../types/model';
 import { renameInTemplate, templateVariables } from './template';
 import { aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
-import { columnsText, hydrateSource } from './hydrate';
+import { hydrateSource, readColumns } from './hydrate';
 import { blobOf, hold, holdBase64, holdText, isHeld, payloadText, release } from './payloads';
 import { Lock, deriveLock, seal, unseal } from './crypt';
 import { saveDocument, exportDocumentJSON, readEmbeddedDoc } from './save';
-import { compareText, compareValues, keyText, replaceFilters, shiftFilters, sortText } from './data';
+import { clone, compareText, compareValues, keyText, replaceFilters, shiftFilters, sortText } from './data';
 import { ColumnTable } from './columns';
-import { Frame, distinctOf, filterFrame, frameRows, joinFrame, reader, tableFrame as makeTableFrame } from './frames';
+import { Frame, blanksOf, distinctOf, filterFrame, frameRows, joinFrame, reader, tableFrame as makeTableFrame } from './frames';
 import { DatePart, datePartKey, datePartLabel } from './dates';
 import type { Order } from './charts';
 import { MeasureCtx, MeasureEnv, wheres, compileMeasure, isMeasureRef, measureError, measureFormat, measureName, measureRef } from './measures';
@@ -40,7 +40,6 @@ export type FilterScope = 'doc' | 'page' | 'visual';
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 /** Rows a text box template can list: enough for any readable text, far short of freezing the page on millions. */
 const LIST_ROWS = 1000;
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 /** The table columns, matrix rows and values of an element. */
 /** Every filter list an element holds: its own, its card comparison's, its text bindings' comparisons'. */
 const filterLists = (e: any): (DashFilter[] | undefined)[] => [e.filters, e.compare?.filters, ...Object.values(e.bindings || {}).map((b: any) => b.compare?.filters)];
@@ -58,8 +57,14 @@ function createDashboardStore() {
   // The editor is always on; preview hides the chrome and shows the sheet as a recipient would see it. A phone (under
   // 640px wide) is always in preview, with the page reflowed into one column (theme.css): it views and filters.
   // or a touch screen under 500px tall: a phone on its side
+  // The only definition of a phone: the app root says it with mode-phone, and theme.css lays the page out by that.
   const phone = matchMedia('(max-width: 639.98px), (pointer: coarse) and (max-height: 500px)');
+  const [isPhone, setIsPhone] = createSignal(phone.matches);
   const [preview, setPreviewSignal] = createSignal(hash.includes('preview') || phone.matches);
+  // printing from the browser's own menu (not print mode): the page prints as a phone shows it, the sheet alone
+  const [paper, setPaper] = createSignal(false);
+  addEventListener('beforeprint', () => setPaper(true));
+  addEventListener('afterprint', () => setPaper(false));
   // print mode shows every page as it will print; nothing is editable there
   const [printing, setPrintingSignal] = createSignal(false);
   const editing = () => !preview() && !printing();
@@ -148,7 +153,8 @@ function createDashboardStore() {
   async function load(id: string) {
     try {
       const table = await hydrateSource(doc.sources[id], (s) =>
-        setStatus(s.step === 'unpack' ? `Opening ${id}…` : `Reading ${id}: ${s.rows.toLocaleString()} rows (${Math.round(s.share * 100)}%)`)
+        // stored data is read a column at a time: its first column already has every row, so only the share tells how far
+        setStatus(s.step === 'unpack' ? `Opening ${id}…` : `Reading ${id}: ${Math.round(s.share * 100)}%`)
       );
       setDataStore(prev => ({ ...prev, [id]: table }));
     } catch (err) {
@@ -164,13 +170,13 @@ function createDashboardStore() {
     // filters from older files name only a field: they get the table it is in (a visual's own, else one it looks up),
     // when that's clear. A page or report filter on a name several tables share keeps applying to each.
     const owner = (field: string, from?: string) =>
-      from && hasField(from, field) ? from : (from ? relationshipsOf(from).map(r => r.other.table) : Object.keys(doc.sources)).filter(t => hasField(t, field)).find((t, _, all) => all.length === 1);
+      from && hasField(from, field) ? from : (from ? relationshipsOf(from).map(r => r.other.table) : tableIds()).filter(t => hasField(t, field)).find((t, _, all) => all.length === 1);
     const own = (fs: DashFilter[] | undefined, from?: string) => fs?.forEach(f => f.table || !(f.table = owner(f.field, from)) && delete f.table);
     if ([doc.filters, ...doc.pages.flatMap(p => [p.filters, ...p.elements.map(e => e.filters)])].some(fs => fs?.some(f => !f.table))) {
       edit('filters', fs => own(fs));
       edit('pages', pages => pages.forEach(p => (own(p.filters), p.elements.forEach(e => own(e.filters, e.sourceId)))));
     }
-    for (const id of Object.keys(doc.sources)) {
+    for (const id of tableIds()) {
       // payloads straight from a file (or Open JSON) are base64 text: keep them as bytes outside the JS heap
       if (!isHeld(doc.sources[id].payload)) setDoc('sources', id, 'payload', await holdBase64(doc.sources[id].payload));
       await load(id);
@@ -189,10 +195,9 @@ function createDashboardStore() {
 
   /** How many non-blank keys of a table's column repeat (compared as relationship keys are). */
   function repeats(table: string, field: string): number {
-    // every non-blank value is keyed once: those beyond the distinct ones are repeats
-    let n = 0;
-    const d = distinctOf(tableFrame(table), field, v => (n++, keyText(v))).length;
-    return n - d;
+    // the non-blank values beyond the distinct ones are repeats
+    const f = tableFrame(table);
+    return f.length - blanksOf(f, field) - distinctOf(f, field, keyText).length;
   }
 
 
@@ -250,7 +255,7 @@ function createDashboardStore() {
   function filterOn(sourceId: string | undefined, f: DashFilter): DashFilter | undefined {
     if (!sourceId || !active(f)) return undefined;
     // without a table (older files): this table if it has the field, else one that has it and reaches this one
-    const from = f.table ?? (hasField(sourceId, f.field) ? sourceId : Object.keys(doc.sources).find(t => hasField(t, f.field) && filterPath(t, f.field, sourceId)));
+    const from = f.table ?? (hasField(sourceId, f.field) ? sourceId : tableIds().find(t => hasField(t, f.field) && filterPath(t, f.field, sourceId)));
     if (!from || !hasField(from, f.field)) return undefined;
     if (from === sourceId) return f;
     const path = filterPath(from, f.field, sourceId);
@@ -291,15 +296,16 @@ function createDashboardStore() {
   /**
    * The base table's rows, merged with each table whose "table.field" columns the element uses, and the tables on
    * the way to it. A relationship's one side (`to`) is a lookup: a repeated key matches its first row, never two.
+   * `base` is the already-filtered table, so visuals that share filters share that work.
    */
-  function joinedFrame(elem: DashElement): Frame {
-    let frame = tableFrame(elem.sourceId);
+  function joinedFrame(elem: DashElement, base?: Frame): Frame {
+    let frame = base ?? tableFrame(elem.sourceId);
     const home = elem.sourceId;
     if (!home) return frame;
-    const refs = fieldRefs(elem);
+    const used = new Set(fieldRefs(elem).map(f => refTableOf(home, f)));
     const joined = new Set([home]); // one join per table
-    for (const t of Object.keys(doc.sources))
-      if (t !== home && refs.some(f => f.startsWith(t + '.')))
+    for (const t of tableIds())
+      if (t !== home && used.has(t))
         for (const hop of joinPath(home, t) ?? []) {
           const other = dataStore()[hop.other.table];
           if (!other || joined.has(hop.other.table)) continue;
@@ -324,8 +330,17 @@ function createDashboardStore() {
   const pageByElement = createMemo(() => new Map(doc.pages.flatMap(p => p.elements.map(e => [e.id, p] as const))));
   const pageFor = (elem: DashElement) => pageByElement().get(elem.id) || getActivePage();
 
+  /** Filtered whole tables, shared by visuals that see the same filters; a new map when the data or those filters change. */
+  const frameCache = createMemo(() => (dataStore(), doc.filters, doc.relationships, doc.pages.forEach(p => (p.filters, p.elements.forEach(e => (e.filters, (e as SlicerElement).selection)))), new Map<string, Frame>()));
+
   /** Applies report-, page-, slicer- and visual-level filters (which follow relationships) to a frame on `sourceId`. */
-  const filterRows = (sourceId: string | undefined, frame: Frame, filters: DashFilter[]) => filterFrame(frame, filters.flatMap(f => filterOn(sourceId, f) ?? []));
+  function filterRows(sourceId: string | undefined, frame: Frame, filters: DashFilter[]): Frame {
+    const applied = filters.flatMap(f => filterOn(sourceId, f) ?? []);
+    if (frame.base.ids) return filterFrame(frame, applied);
+    const cache = frameCache(), key = (sourceId ?? '') + JSON.stringify(filters);
+    let g = cache.get(key);
+    return g || (cache.set(key, (g = filterFrame(frame, applied))), g);
+  }
 
   /**
    * Every filter on a visual: the report's, its page's and its page's slicers' (but `skip`), then its own. A
@@ -336,9 +351,9 @@ function createDashboardStore() {
     return (elem as any).whole ? elem.filters || [] : [...(doc.filters || []), ...(page?.filters || []), ...slicerFilters(page, skip), ...(elem.filters || [])];
   }
 
-  /** What an element reads: its table's rows after joins and filters, as a frame (positions, not row copies). */
+  /** What an element reads: its table's rows after filters (shared with the same filters), then the joins it needs. */
   function getFrame(elem: DashElement): Frame {
-    return filterRows(elem.sourceId, joinedFrame(elem), filtersOf(elem));
+    return joinedFrame(elem, filterRows(elem.sourceId, tableFrame(elem.sourceId), filtersOf(elem)));
   }
 
   /**
@@ -353,7 +368,7 @@ function createDashboardStore() {
     const values = sortText(distinctOf(frame, field, datePart ? (v) => datePartKey(String(v), datePart) : String));
     const cmp = !datePart && sortOrder(elem.sourceId, field);
     if (cmp) values.sort(cmp);
-    const bound = (m: 'min' | 'max') => (refType(elem.sourceId, field) === 'datetime' ? undefined : aggregate(all, m, field) ?? undefined);
+    const bound = (m: 'min' | 'max') => (isNumericType(refType(elem.sourceId, field)) ? aggregate(all, m, field) ?? undefined : undefined);
     return { values, min: bound('min'), max: bound('max') };
   }
 
@@ -453,6 +468,10 @@ function createDashboardStore() {
 
   /** True for a table's name (and never for a name every object has, like "constructor"). */
   const isTable = (name: string) => Object.hasOwn(doc.sources, name);
+  /** The tables' names, in order. */
+  function tableIds() {
+    return Object.keys(doc.sources);
+  }
   const fieldsOf = (sourceId?: string) => (sourceId && isTable(sourceId) && doc.sources[sourceId].structure) || [];
   const hasField = (table: string, name: string) => fieldsOf(table).some(c => c.name === name);
 
@@ -464,7 +483,7 @@ function createDashboardStore() {
   };
   const setPrinting = deselecting(setPrintingSignal);
   const setPreview = deselecting(setPreviewSignal);
-  phone.onchange = (e) => setPreview(e.matches);
+  phone.onchange = (e) => (setIsPhone(e.matches), setPreview(e.matches));
 
   /**
    * Prints every page, one per sheet: lays them all out (off screen), lets the charts draw at their size, then
@@ -785,10 +804,16 @@ function createDashboardStore() {
     updateElement(activePageId(), e.id, updates);
   }
 
+  /**
+   * The other table a "table.field" name in a visual on `home` reads: the longest table name that fits ("a.b.x" is
+   * of "a.b" before "a"), from `tables`. Undefined for `home`'s own fields.
+   */
+  const refTableOf = (home: string | undefined, ref: string, tables = tableIds()) =>
+    home && hasField(home, ref) ? undefined : tables.filter(t => ref.startsWith(t + '.')).sort((a, b) => b.length - a.length)[0];
+
   /** The table and field a stored field name refers to (plain names belong to the visual's own table). */
   function describeRef(sourceId: string | undefined, name: string): { table: string; field: string } {
-    if (sourceId && hasField(sourceId, name)) return { table: sourceId, field: name };
-    const table = Object.keys(doc.sources).filter(t => name.startsWith(t + '.')).sort((a, b) => b.length - a.length)[0];
+    const table = refTableOf(sourceId, name);
     return table ? { table, field: name.slice(table.length + 1) } : { table: sourceId || '', field: name };
   }
 
@@ -1095,10 +1120,22 @@ function createDashboardStore() {
     );
   }
 
-  /** Jumps to a visual on any page. */
-  function selectElement(pageId: string, elementId: string) {
-    setActivePageId(pageId);
-    setSelectedElementId(elementId);
+  /**
+   * What uses each column of a table, by name: visuals (by title and page), measures (their field, operands and
+   * wheres), relationships, filters at every level and other columns' sort order. A column with none is unused.
+   */
+  function columnUses(table: string): Map<string, string[]> {
+    const uses = new Map<string, Set<string>>();
+    const add = (col: string | undefined, what: string) => col && (uses.get(col) ?? uses.set(col, new Set()).get(col)!).add(what);
+    for (const u of usagesOf(table)) for (const f of u.fields) add(f, `${u.element.title || u.element.type} (${u.page.title})`);
+    for (const r of relationshipsOf(table)) add(r.mine.field, `the relationship with ${r.other.table}`);
+    for (const m of doc.measures || []) {
+      if (m.table === table) [m.field, m.a?.field, m.b?.field].forEach(f => add(f, `measure ${m.name}`));
+      for (const w of wheres(m)) if ((w.table ?? m.table) === table) add(w.field, `measure ${m.name}`);
+    }
+    for (const fs of [doc.filters, ...doc.pages.flatMap(p => [p.filters, ...p.elements.flatMap(filterLists)])]) for (const f of fs || []) if (f.table === table) add(f.field, 'a filter');
+    for (const c of fieldsOf(table)) add(c.sortBy, `the order of ${c.name}`);
+    return new Map([...uses].map(([c, s]) => [c, [...s]]));
   }
 
   // --- Relationships ---
@@ -1140,7 +1177,7 @@ function createDashboardStore() {
   function lostWith(e: DashElement, index: number): string[] {
     if (!e.sourceId) return [];
     const keep = reachable(e.sourceId, index);
-    const tableOf = (f: string) => (f.startsWith('[') ? findMeasure(e.sourceId, measureName(f))?.table : Object.keys(doc.sources).find(t => f.startsWith(t + '.')));
+    const tableOf = (f: string) => (f.startsWith('[') ? findMeasure(e.sourceId, measureName(f))?.table : refTableOf(e.sourceId, f));
     return fieldRefs(e).filter(f => {
       const t = tableOf(f);
       return t && !keep.has(t);
@@ -1170,6 +1207,7 @@ function createDashboardStore() {
     if (to === from) return null;
     if (isTable(to)) return `A table named "${to}" already exists.`;
     pushHistory();
+    const tables = tableIds();
     setDoc('sources', reconcile(renameKey(clone(doc.sources), from, to)));
     const moveFilters = (fs?: DashFilter[]) => fs?.forEach(f => f.table === from && (f.table = to));
     edit('filters', moveFilters);
@@ -1180,8 +1218,9 @@ function createDashboardStore() {
         // a text box naming the table (and not a variable of its own of that name) follows
         const el = e as any;
         if (el.content && !el.bindings?.[from]) el.content = renameInTemplate(el.content, n => (n === from ? to : n));
+        // "table.field" references (read before the visual's own table is renamed)
+        mapRefs(e, f => (refTableOf(e.sourceId === from ? to : e.sourceId, f, tables) === from ? to + f.slice(from.length) : f));
         if (e.sourceId === from) e.sourceId = to;
-        mapRefs(e, f => (f.startsWith(from + '.') ? `${to}.${f.slice(from.length + 1)}` : f)); // "table.field" references
         for (const b of Object.values((e as any).bindings || {}) as { table: string }[]) if (b.table === from) b.table = to;
       }
     });
@@ -1211,7 +1250,7 @@ function createDashboardStore() {
     if (to === from) return null;
     if (src.structure.some(c => c.name === to)) return `"${to}" already exists in ${sourceId}.`;
 
-    const payload = await holdText(await columnsText(await payloadText(src.payload), 'csv-columns', (n) => (n === from ? to : n)));
+    const payload = holdText(await readColumns(await payloadText(src.payload), 'csv-columns', { rename: n => (n === from ? to : n) }));
     pushHistory();
     setDoc('sources', sourceId, 'payload', payload);
     setDoc('sources', sourceId, 'structure', i, 'name', to);
@@ -1263,13 +1302,14 @@ function createDashboardStore() {
 
   function removeDataSource(id: string) {
     pushHistory();
+    const tables = tableIds();
     setDoc('sources', id, undefined!);
     const touches = (r: DashRelationship) => r.from.table === id || r.to.table === id;
     if (doc.relationships?.some(touches)) setDoc('relationships', rels => rels!.filter(r => !touches(r)));
     if (doc.measures?.some(m => m.table === id)) setDoc('measures', ms => ms!.filter(m => m.table !== id));
     // visuals on it are left empty; others lose what they read of it (fields, bindings, filters)
     // (a filter without a table goes when no table left has its field)
-    const keep = (fs?: DashFilter[]) => fs?.splice(0, fs.length, ...fs.filter(f => (f.table ? f.table !== id : Object.keys(doc.sources).some(t => hasField(t, f.field)))));
+    const keep = (fs?: DashFilter[]) => fs?.splice(0, fs.length, ...fs.filter(f => (f.table ? f.table !== id : tableIds().some(t => hasField(t, f.field)))));
     edit('filters', keep);
     edit('pages', pages => {
       for (const p of pages) {
@@ -1277,7 +1317,7 @@ function createDashboardStore() {
         for (const e of p.elements as any[]) {
           filterLists(e).forEach(keep);
           for (const [k, b] of Object.entries(e.bindings || {}) as [string, any][]) if (b.table === id) delete e.bindings[k];
-          if (e.sourceId !== id) dropRefs(e, f => f.startsWith(id + '.'));
+          if (e.sourceId !== id) dropRefs(e, f => refTableOf(e.sourceId, f, tables) === id);
           else {
             dropRefs(e, () => true);
             e.sourceId = e.summary = e.lineSummary = e.xSummary = e.dateParts = undefined;
@@ -1320,7 +1360,7 @@ function createDashboardStore() {
   /** Runs `use` on the document as it is written out: with a password, every payload sealed into `encryption`. */
   async function sealed<T>(use: (d: DashDocument) => Promise<T>): Promise<T> {
     if (!lock) return use(doc);
-    const ids = Object.keys(doc.sources);
+    const ids = tableIds();
     const [meta, cipher] = await seal(lock, await Promise.all(ids.map(async id => [id, await blobOf(doc.sources[id].payload)] as [string, Blob])));
     const ciphertext = hold(cipher);
     try {
@@ -1355,6 +1395,8 @@ function createDashboardStore() {
   return {
     doc,
     editing,
+    phone: isPhone,
+    paper,
     preview,
     setPreview,
     printing,
@@ -1398,7 +1440,6 @@ function createDashboardStore() {
     deleteMeasure,
     setSlicerSelection,
     fieldsOf,
-    allFields,
     distinctValues,
     filterType,
     compareLabel,
@@ -1435,11 +1476,11 @@ function createDashboardStore() {
     saveRelationship,
     removeRelationship,
     usagesOf,
+    columnUses,
     linkedUsages,
     measureEnv,
     repeats,
     connectedTables: (table: string) => [...reachable(table)].filter(t => t !== table),
-    selectElement,
     undo,
     redo,
     canUndo: () => historyLen() >= 1000,

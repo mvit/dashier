@@ -12,6 +12,9 @@ const SAMPLE = 'site/examples/brightside.dashier.html';
 const FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-phone-')), 'brightside.dashier.html');
 execFileSync(process.execPath, ['upgrade.mjs', SAMPLE, FILE]); // the sample's document, this build's app
 const doc = JSON.parse(fs.readFileSync(FILE, 'utf8').match(/id="dashier-doc">([\s\S]*?)<\/script>/)[1]);
+// and a short page with no slicers: its tabs still sit at the bottom of the screen, and there's nothing to filter
+doc.pages.push({ id: 'note', title: 'Note', elements: [{ id: 'note_text', type: 'markdown', x: 0, y: 0, w: 12, h: 2, content: 'A short page.' }] });
+fs.writeFileSync(FILE, fs.readFileSync(FILE, 'utf8').replace(/(id="dashier-doc">)[\s\S]*?(<\/script>)/, (_, a, b) => a + JSON.stringify(doc).replace(/</g, '\\u003c') + b));
 const OUT = 'test-results/phone';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -57,6 +60,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       check(`${name}: cards two to a row`, cardTiles.every((t, i) => Math.abs(t.width - (grid - 10) / 2) < 2 && (i % 2 ? Math.abs(t.top - cardTiles[i - 1].top) < 1 && t.left > cardTiles[i - 1].left : true)));
       check(`${name}: other visuals at full width, each tall enough to read`,
         shown.filter((t) => t.type !== 'card').every((t) => Math.abs(t.width - grid) < 2 && (t.type === 'markdown' ? t.height > 30 : t.height >= 280)));
+      const bar = await page.$eval('.d-bottom-pages-bar', (b) => [Math.round(b.getBoundingClientRect().bottom), innerHeight]);
+      check(`${name}: the page tabs sit at the bottom of the screen`, Math.abs(bar[0] - bar[1]) <= 1, bar.join(' vs '));
+      const slicers = p.elements.some((e) => e.type === 'slicer');
+      check(`${name}: the Filters button ${slicers ? 'opens the page\'s slicers' : 'is disabled: no slicers here'}`, (await page.$eval('.d-drawer-btn', (b) => b.disabled)) === !slicers);
       await page.screenshot({ path: `${OUT}/${width}x${height}-${p.id}.png`, fullPage: true });
     }
 
@@ -70,10 +77,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await button.tap();
     await page.waitForSelector('.d-drawer .d-slicer');
     await page.screenshot({ path: `${OUT}/${width}x${height}-filters.png` });
+    const drawerBox = await page.$eval('.d-drawer', (d) => { const r = d.getBoundingClientRect(); return r.top <= 0 && r.left <= 0 && r.width >= innerWidth && r.height >= innerHeight; });
+    check(`${at}: the drawer fills the screen`, drawerBox);
+    check(`${at}: the drawer's slicers are cards, closed by the Filters button (no Done)`, !!(await page.$('.d-drawer .d-filter-card')) && !(await page.$('.d-drawer .btn-primary')));
     await (await page.$('.d-drawer .d-slicer-tile')).tap();
-    await (await page.$('.d-drawer .btn-primary')).tap();
+    await sleep(100);
+    const picked = await page.$eval('.d-drawer .filter-type', (e) => e.textContent);
+    await button.tap();
     await sleep(300);
-    check(`${at}: a slicer picked in the drawer filters the page`, !(await page.$('.d-drawer')) && (await values()) !== before, `${before} → ${await values()}`);
+    check(`${at}: a slicer picked in the drawer filters the page, and its card says what's picked`, !(await page.$('.d-drawer')) && (await values()) !== before && picked.startsWith('is '), `${picked} · ${before} → ${await values()}`);
     await page.evaluate(() => scrollTo(0, 400));
     check(`${at}: the Filters button stays at the top while scrolling`, ((await button.boundingBox())?.y ?? 99) < 20);
 

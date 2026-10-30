@@ -1,4 +1,5 @@
-import { Component, Show, For, JSX, createEffect, createSignal } from 'solid-js';
+import { clone } from '../runtime/data';
+import { Component, Show, For, createEffect, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { DroppedField, dropProps } from '../runtime/dnd';
 import { chartKind, summaryLabel, valueLabel } from '../runtime/charts';
@@ -10,31 +11,41 @@ import { ThemeEditor } from './ThemeEditor';
 import { FormatPane } from './FormatPane';
 import { TemplateSlots, bindingFor, variableName } from './TemplateSlots';
 
-type GalleryItem = [title: string, type: WidgetType, chartType: ChartType | undefined, icon: JSX.Element];
+type GalleryItem = [title: string, type: WidgetType, chartType: ChartType | undefined, icon: string];
+
+// gallery icons: SVG markup on a 24×24 grid, filled shapes or lines `w` wide
+const fill = (s: string, more = '') => `<g fill="currentColor"${more}>${s}</g>`;
+const line = (w: number, s: string) => `<g fill="none" stroke="currentColor" stroke-width="${w}">${s}</g>`;
+const op = (o: number) => ` opacity="${o}"`;
+const bar = (x: number, y: number, w: number, h: number, more = '') => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1"${more}/>`;
+const dot = (x: number, y: number, more = '') => `<circle cx="${x}" cy="${y}" r="2"${more}/>`;
+const path = (d: string, more = '') => `<path d="${d}"${more}/>`;
+const shape = (tag: string, points: string, more = '') => `<${tag} points="${points}"${more}/>`;
+const grid = (d: string) => line(2, `<rect x="3" y="3" width="18" height="18" rx="2"/>${path(d)}`);
 
 /**
  * The gallery, by what a visual is for: comparisons, trends, parts of a whole, relationships and flows; then, on
  * a row of their own after a divider (null), single numbers, tables, filters and content.
  */
 const GALLERY: (GalleryItem | null)[] = [
-  ['Column chart', 'chart', 'bar', <g fill="currentColor"><rect x="4" y="10" width="4" height="10" rx="1" /><rect x="10" y="4" width="4" height="16" rx="1" /><rect x="16" y="13" width="4" height="7" rx="1" /></g>],
-  ['Bar chart', 'chart', 'hbar', <g fill="currentColor"><rect x="4" y="4" width="10" height="4" rx="1" /><rect x="4" y="10" width="16" height="4" rx="1" /><rect x="4" y="16" width="7" height="4" rx="1" /></g>],
-  ['Line and column chart', 'chart', 'combo', <g><g fill="currentColor" opacity="0.55"><rect x="4" y="12" width="4" height="8" rx="1" /><rect x="10" y="9" width="4" height="11" rx="1" /><rect x="16" y="13" width="4" height="7" rx="1" /></g><polyline points="3 10 9 5 15 8 21 3" fill="none" stroke="currentColor" stroke-width="2.2" /></g>],
-  ['Line chart', 'chart', 'line', <polyline points="3 18 9 10 15 14 21 6" fill="none" stroke="currentColor" stroke-width="2.5" />],
-  ['Area chart', 'chart', 'area', <g><path d="M3 20 L3 13 L9 8 L15 11 L21 5 L21 20 Z" fill="currentColor" opacity="0.4" /><polyline points="3 13 9 8 15 11 21 5" fill="none" stroke="currentColor" stroke-width="2.2" /></g>],
-  ['Pie chart', 'chart', 'pie', <g fill="currentColor"><path d="M12 2 A 10 10 0 0 1 22 12 L 12 12 Z" /><path d="M10 12 L 10 2 A 10 10 0 1 0 22 10 L 10 10 Z" opacity="0.6" /></g>],
-  ['Donut chart', 'chart', 'donut', <g fill="none" stroke="currentColor" stroke-width="5"><path d="M12 4.5 A 7.5 7.5 0 0 1 19.5 12" /><path d="M19.5 12 A 7.5 7.5 0 1 1 12 4.5" opacity="0.6" /></g>],
-  ['Treemap', 'chart', 'treemap', <g fill="currentColor"><rect x="3" y="3" width="11" height="11" rx="1" /><rect x="16" y="3" width="5" height="7" rx="1" opacity="0.7" /><rect x="16" y="12" width="5" height="9" rx="1" opacity="0.5" /><rect x="3" y="16" width="11" height="5" rx="1" opacity="0.7" /></g>],
-  ['Scatter chart', 'chart', 'scatter', <g fill="currentColor"><circle cx="6" cy="17" r="2" /><circle cx="10" cy="11" r="2" /><circle cx="14" cy="14" r="2" /><circle cx="17" cy="7" r="2" /><circle cx="19" cy="12" r="2" opacity="0.6" /></g>],
-  ['Radar chart', 'chart', 'radar', <g fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 3 21 10 17.5 20 6.5 20 3 10" opacity="0.5" /><polygon points="12 8 16 11 15 16 9 16 8 11" /></g>],
-  ['Sankey flow', 'chart', 'sankey', <g fill="none" stroke="currentColor" stroke-width="3"><path d="M4 6 C 12 6 12 16 20 16" /><path d="M4 12 C 12 12 12 7 20 7" opacity="0.6" /></g>],
-  ['Gauge', 'chart', 'gauge', <path d="M4 17 A 8 8 0 0 1 20 17" fill="none" stroke="currentColor" stroke-width="3.5" />],
+  ['Column chart', 'chart', 'bar', fill(bar(4, 10, 4, 10) + bar(10, 4, 4, 16) + bar(16, 13, 4, 7))],
+  ['Bar chart', 'chart', 'hbar', fill(bar(4, 4, 10, 4) + bar(4, 10, 16, 4) + bar(4, 16, 7, 4))],
+  ['Line and column chart', 'chart', 'combo', fill(bar(4, 12, 4, 8) + bar(10, 9, 4, 11) + bar(16, 13, 4, 7), op(0.55)) + line(2.2, shape('polyline', '3 10 9 5 15 8 21 3'))],
+  ['Line chart', 'chart', 'line', line(2.5, shape('polyline', '3 18 9 10 15 14 21 6'))],
+  ['Area chart', 'chart', 'area', fill(path('M3 20 L3 13 L9 8 L15 11 L21 5 L21 20 Z'), op(0.4)) + line(2.2, shape('polyline', '3 13 9 8 15 11 21 5'))],
+  ['Pie chart', 'chart', 'pie', fill(path('M12 2 A 10 10 0 0 1 22 12 L 12 12 Z') + path('M10 12 L 10 2 A 10 10 0 1 0 22 10 L 10 10 Z', op(0.6)))],
+  ['Donut chart', 'chart', 'donut', line(5, path('M12 4.5 A 7.5 7.5 0 0 1 19.5 12') + path('M19.5 12 A 7.5 7.5 0 1 1 12 4.5', op(0.6)))],
+  ['Treemap', 'chart', 'treemap', fill(bar(3, 3, 11, 11) + bar(16, 3, 5, 7, op(0.7)) + bar(16, 12, 5, 9, op(0.5)) + bar(3, 16, 11, 5, op(0.7)))],
+  ['Scatter chart', 'chart', 'scatter', fill(dot(6, 17) + dot(10, 11) + dot(14, 14) + dot(17, 7) + dot(19, 12, op(0.6)))],
+  ['Radar chart', 'chart', 'radar', line(2, shape('polygon', '12 3 21 10 17.5 20 6.5 20 3 10', op(0.5)) + shape('polygon', '12 8 16 11 15 16 9 16 8 11'))],
+  ['Sankey flow', 'chart', 'sankey', line(3, path('M4 6 C 12 6 12 16 20 16') + path('M4 12 C 12 12 12 7 20 7', op(0.6)))],
+  ['Gauge', 'chart', 'gauge', line(3.5, path('M4 17 A 8 8 0 0 1 20 17'))],
   null,
-  ['Card (KPI)', 'card', undefined, <g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 12h10" /></g>],
-  ['Table', 'table', undefined, <g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 3v18" /></g>],
-  ['Matrix', 'matrix', undefined, <g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 3v18M15 9v12" /><path d="M5 13h2M5 17h2" opacity="0.6" /></g>],
-  ['Slicer', 'slicer', undefined, <g fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16l-6 7v6l-4 2v-8z" /></g>],
-  ['Text box', 'markdown', undefined, <path d="M4 7V4h16v3M12 4v16M9 20h6" fill="none" stroke="currentColor" stroke-width="2" />],
+  ['Card (KPI)', 'card', undefined, line(2, `<rect x="3" y="5" width="18" height="14" rx="2"/>${path('M7 12h10')}`)],
+  ['Table', 'table', undefined, grid('M3 9h18M9 3v18')],
+  ['Matrix', 'matrix', undefined, grid('M3 9h18M9 3v18M15 9v12') + line(2, path('M5 13h2M5 17h2', op(0.6)))],
+  ['Slicer', 'slicer', undefined, line(2, path('M4 5h16l-6 7v6l-4 2v-8z'))],
+  ['Text box', 'markdown', undefined, line(2, path('M4 7V4h16v3M12 4v16M9 20h6'))],
 ];
 
 type Slot = 'x' | 'y' | 'group' | 'line' | 'detail' | 'field' | 'column' | 'row' | 'col' | 'value';
@@ -45,7 +56,7 @@ export const VisualsPane: Component = () => {
   const update = (updates: object) => sel() && store.updateElement(store.activePageId(), sel().id, updates as any);
   const set = (prop: string, val: any) => update({ [prop]: val });
   // drops undefined entries (e.g. a column's cleared summary) from what's stored
-  const setClean = (prop: string, val: any) => set(prop, JSON.parse(JSON.stringify(val)));
+  const setClean = (prop: string, val: any) => set(prop, clone(val));
   const setIn = (prop: string, key: string, val: any) => set(prop, { ...(sel()?.[prop] || {}), [key]: val === '' ? undefined : val });
   const setAgg = (prop: string) => (m?: AggregationMethod) => set(prop, m === 'sum' ? undefined : { aggregate: m });
   const isType = (t: WidgetType, c?: ChartType) => sel()?.type === t && (!c || chartKind(sel().chartType) === c);
@@ -56,15 +67,12 @@ export const VisualsPane: Component = () => {
   const textDrop = dropProps((f) => {
     const name = variableName(sel(), f);
     update({ content: `${sel().content ? sel().content + '\n' : ''}{{ ${name} }}`, bindings: { ...(sel().bindings || {}), [name]: bindingFor(f) } });
-  }, setOver);
+  }, setOver, true);
 
-  // Fields are only ever dragged in: the first one decides the visual's table, later ones must be connected to it.
+  // Fields are only ever dragged in (a whole table isn't offered): the first decides the visual's table, later ones
+  // must be connected to it.
   createEffect(() => (sel()?.id, store.setDropNote('')));
-  const take = (slot: Slot) => (f: DroppedField): boolean => {
-    if (f.field) return store.assignField(sel(), slot, { table: f.table, field: f.field });
-    store.setDropNote('Drop a field here, not a whole table.');
-    return false;
-  };
+  const take = (slot: Slot) => (f: DroppedField): boolean => !!f.field && store.assignField(sel(), slot, { table: f.table, field: f.field });
 
   /** A table's columns (one that names none shows every field of its table), or a matrix's rows, columns or values. */
   const list = (key: List): any[] =>
@@ -214,7 +222,7 @@ export const VisualsPane: Component = () => {
                 title={sel() ? `Change to ${title}` : `Add ${title}`}
                 onClick={() => (sel() ? store.transformSelectedVisual : store.createElement)(type, chartType)}
               >
-                <svg viewBox="0 0 24 24">{icon}</svg>
+                <svg viewBox="0 0 24 24" innerHTML={icon} />
               </button>
             );
           }}

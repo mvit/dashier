@@ -12,7 +12,7 @@ export function filterTest(f: DashFilter): (v: unknown) => boolean {
   return (v) => {
     if (values && !values.has(text(f.datePart ? datePartKey(String(v ?? ''), f.datePart) : v))) return false;
     if (f.min != null || f.max != null) {
-      const n = v == null || !String(v).trim() ? NaN : Number(v); // a blank isn't 0
+      const n = typeof v === 'number' ? v : v == null || !String(v).trim() ? NaN : Number(v); // a blank isn't 0
       if (!(n >= (f.min ?? -Infinity) && n <= (f.max ?? Infinity))) return false;
     }
     return !range || inRange(String(v ?? ''), range.from, range.to);
@@ -30,6 +30,18 @@ export const shiftFilters = (own: DashFilter[] = [], by: Shift, isDate: (f: Dash
     const r = f.last ? lastRange(f.last.n, f.last.unit) : f.from && f.to ? { from: f.from, to: f.to } : null;
     return r ? [{ ...f, last: undefined, ...shiftRange(r.from, r.to, by) }] : [];
   });
+
+/**
+ * What a filter or a slicer's pick keeps, in words ("Last 3 months", "from 2024-01-01", "≥ 5", "is East, West", or
+ * "3 of 12": `label` writes a value, `of` counts the values offered); empty when it keeps everything.
+ */
+export function pickSummary(f: Partial<DashFilter> = {}, label: (v: string) => string, of: () => number): string {
+  const { last, from, to, min, max, values: s = [] } = f;
+  if (last) return `Last ${last.n} ${last.unit}${last.n > 1 ? 's' : ''}`;
+  if (from || to) return from && to ? `${from} – ${to}` : from ? `from ${from}` : `to ${to}`;
+  if (min != null || max != null) return min != null && max != null ? `${min} – ${max}` : min != null ? `≥ ${min}` : `≤ ${max}`;
+  return s.length ? (s.length < 3 ? `is ${s.map(label).join(', ')}` : `${s.length} of ${of()}`) : '';
+}
 
 /** `own` filters with `by` in place of those on the same fields (a comparison's other period, say). */
 export const replaceFilters = (own: DashFilter[] = [], by: DashFilter[] = []) =>
@@ -52,6 +64,9 @@ const collate = new Intl.Collator(undefined, { numeric: true }).compare;
 /** Natural text order ("Q2" before "Q10"), numbers by value ("-2.5" before "-1.25"), from one shared collator. */
 export const compareText = (a: string, b: string) => (NUMBER.test(a) && NUMBER.test(b) ? +a - +b || collate(a, b) : collate(a, b));
 
+/** A deep copy of plain data (a store's, whose proxies structuredClone can't copy). */
+export const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+
 /** No value: null, undefined or empty text. */
 export const isBlank = (v: unknown): boolean => v == null || v === '';
 
@@ -71,16 +86,13 @@ export const sortText = (values: string[]) => (values.length > COLLATE_MAX ? val
  */
 export function sortOrder(n: number, read: (k: number) => unknown, desc = false): Int32Array {
   const values = Array.from({ length: n }, (_, k) => read(k));
-  let key: (v: any) => number;
-  if (values.every(v => isBlank(v) || typeof v === 'number')) key = v => v;
-  else {
-    const rank = new Map(sortText([...new Set(values.filter(v => !isBlank(v)).map(String))]).map((v, i) => [v, i]));
-    key = v => rank.get(String(v))!;
+  const rank = values.every(v => isBlank(v) || typeof v === 'number') ? null : new Map(sortText([...new Set(values.filter(v => !isBlank(v)).map(String))]).map((v, i) => [v, i]));
+  // descending negates the keys, so blanks (and NaN) stay last; ties keep their order
+  const keys = new Float64Array(n), order = new Int32Array(n);
+  for (let k = 0; k < n; k++) {
+    const v = values[k], x = (desc ? -1 : 1) * (rank ? rank.get(String(v))! : (v as number));
+    keys[k] = isBlank(v) || x !== x ? Infinity : x;
+    order[k] = k;
   }
-  // descending negates the keys, so blanks stay last
-  const dir = desc ? -1 : 1;
-  const keys = values.map(v => (isBlank(v) ? null : key(v) * dir));
-  const order = Int32Array.from({ length: n }, (_, i) => i);
-  order.sort((a, b) => compareValues(keys[a], keys[b]));
-  return order;
+  return order.sort((a, b) => keys[a] - keys[b] || a - b);
 }

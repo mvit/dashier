@@ -197,7 +197,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ── top bar is minimal ──────────────────────────────────────────────────────
   const barButtons = await page.$$eval('.ed-topbar button', (bs) => bs.map((b) => b.textContent.trim() || `${b.title} [${b.querySelector('svg') ? 'icon' : ''}]`));
-  check('top bar only has the logo (About), undo/redo (drawn icons), Preview and Share', JSON.stringify(barButtons) === JSON.stringify(['About Dashier [icon]', 'Undo (Ctrl+Z) [icon]', 'Redo (Ctrl+Y) [icon]', '▶ Preview', 'Share ▾']), barButtons.join(' | '));
+  // shortcuts as the keyboard writes them: ⌘Z and ⇧⌘Z on a Mac
+  const mac = await page.evaluate(() => /Mac|iP(hone|ad|od)/.test(navigator.userAgent));
+  const undoRedo = mac ? ['Undo (⌘Z) [icon]', 'Redo (⇧⌘Z) [icon]'] : ['Undo (Ctrl+Z) [icon]', 'Redo (Ctrl+Y) [icon]'];
+  check('top bar only has the logo (About), undo/redo (drawn icons), Preview and Share', JSON.stringify(barButtons) === JSON.stringify(['About Dashier [icon]', ...undoRedo, '▶ Preview', 'Share ▾']), barButtons.join(' | '));
   await page.click('.ed-logo');
   await page.waitForSelector('.d-about');
   const about = await page.$eval('.d-about', (e) => e.textContent);
@@ -237,7 +240,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('.ed-topbar .ed-btn-primary');
   await page.waitForSelector('.d-context-menu');
   const share = await page.$$eval('.d-context-menu button', (bs) => bs.map((b) => b.textContent));
-  check('Share offers Save, Save a copy, Print, then encryption, then Export and Open JSON', share.join() === 'SaveCtrl+S,Save a copy…,Print…Ctrl+P,Encrypt with password…,Remove encryption,Export JSON,Open JSON…' && (await page.$$('.d-context-menu hr')).length === 2, share.join());
+  // shortcuts as the keyboard writes them: ⌘S on a Mac, Ctrl+S elsewhere
+  const mod = await page.evaluate(() => (/Mac|iP(hone|ad|od)/.test(navigator.userAgent) ? '⌘' : 'Ctrl+'));
+  check('Share offers Save, Save as and Print, then a password, then the report as JSON', share.join() === `Save${mod}S,Save as…,Print…${mod}P,Add a password…,Export as JSON,Replace with JSON…` && (await page.$$('.d-context-menu hr')).length === 2, share.join());
+  const wraps = await page.$$eval('.d-context-menu button', (bs) => bs.some((b) => b.getBoundingClientRect().height > 40));
+  const hints = await page.$$eval('.d-context-menu button', (bs) => bs.filter((b) => b.title).length);
+  check('…each on one line, and what Save as, Print, the password and JSON do on hover', !wraps && hints === 5, `${wraps} · ${hints} hints`);
   await page.keyboard.press('Escape');
   check('…and Esc closes it', !(await page.$('.d-context-menu')));
 
@@ -245,7 +253,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const tables = () => page.$$eval('.d-table-name', (ns) => ns.map((n) => n.textContent));
   const rightClick = async (table, item) => {
     const i = (await tables()).indexOf(table);
-    await (await page.$$('.d-table-header'))[i].click({ button: 'right' });
+    await (await page.$$('.d-table-node .d-card-head'))[i].click({ button: 'right' });
     await page.waitForSelector('.d-context-menu');
     await page.$$eval('.d-context-menu button', (b, re) => b.find((x) => new RegExp(re).test(x.textContent)).click(), item);
   };
@@ -255,10 +263,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const field = (cls, value) => page.evaluateHandle((c, v) => [...document.querySelectorAll(c)].find((i) => i.value === v), cls, value);
   const retype = async (handle, text) => { await handle.click({ count: 3 }); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
   // a column of the Edit Data grid: its type and its blank count from the header's profile
-  const rowOf = (col) => page.$$eval('.modal-dialog thead th[data-col]', (hs, c) => {
-    const h = hs.find((x) => x.querySelector('.d-name-input').value === c);
-    return h ? { type: h.querySelector('select').value, blanks: (h.querySelector('.d-col-blank')?.textContent ?? '').replace(' blank', '') } : null;
-  }, col);
+  // a column's type, and its counts from the tooltip its header shows once hovered
+  const rowOf = async (col) => {
+    const at = await page.$$eval('.modal-dialog thead th[data-col]', (hs, c) => hs.findIndex((x) => x.querySelector('.d-name-input').value === c), col);
+    if (at < 0) return null;
+    const th = (await page.$$('.modal-dialog thead th[data-col]'))[at];
+    await th.hover();
+    return th.evaluate((h) => ({ type: h.querySelector('select').value, stats: h.title, blanks: (/^([\d,]+) blank/.exec(h.title) ?? [])[1] ?? '' }));
+  };
   const setType = (col, type) => page.$$eval('.modal-dialog thead th[data-col]', (hs, c, t) => {
     const sel = hs.find((h) => h.querySelector('.d-name-input').value === c).querySelector('select');
     sel.value = t;
@@ -266,19 +278,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }, col, type);
 
   // the ⋯ button opens the same menu
-  await page.hover('.d-table-header');
+  await page.hover('.d-table-node .d-card-head');
   await page.click('.d-table-more');
   check('a table\'s ⋯ button opens its menu', !!(await page.$('.d-context-menu')));
   await page.keyboard.press('Escape');
 
   await editData('regional_metrics');
   check('Edit Data shows the data with each column\'s type', (await page.$$('.modal-dialog thead th[data-col]')).length === 4 && (await page.$$('.modal-dialog tbody tr')).length === 16 && (await rowOf('revenue')).type === 'float');
+  const revenueStats = (await rowOf('revenue')).stats;
+  check('hovering a column shows its counts: blanks, distinct values, its range', /^0 blank · \d+ distinct · [\d,.]+ to [\d,.]+$/.test(revenueStats) && !(await page.$('.modal-dialog thead .d-col-blank')), revenueStats);
   await setType('region', 'float');
   await sleep(250);
   check('changing a type re-reads the data (text as float → blank)', (await rowOf('region')).blanks === '16', (await rowOf('region')).blanks);
   await setType('region', 'string');
   await sleep(250);
-  check('changing it back restores the values', (await rowOf('region')).blanks === '');
+  check('changing it back restores the values', (await rowOf('region')).blanks === '0', (await rowOf('region')).stats);
 
   // connections = relationships between this table's fields and other tables' fields
   await tab(2);
@@ -303,11 +317,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('the connected field can be changed (and a type mismatch is flagged)', (await rels())[0].field === 'target_revenue' && (await rels())[0].meta.includes('types differ'), JSON.stringify((await rels())[0]));
   await page.select('.d-rel .d-rel-field', 'area');
   check('…and changed back', (await rels())[0].field === 'area');
-  await tab(3);
-  check('Used by lists every visual bound to the table, on all pages', (await page.$$('.d-usage')).length === 10);
-  await page.click('.d-usage');
-  await page.waitForSelector('.modal-dialog', { hidden: true });
-  check('clicking a visual jumps to it', !!(await page.$('.d-selection-frame')));
+  // the header says what uses the table: visuals, measures, relationships, filters (each column's on hover)
+  await tab(1);
+  const [usedBy, usesTitle] = await page.$eval('.modal-dialog .d-editdata-meta .d-uses', (e) => [e.textContent.trim(), e.title]);
+  const regionUses = usesTitle.split('\n').find((l) => l.startsWith('region: ')) ?? '';
+  check('the table says what uses it, each column\'s uses on hover: visuals, the relationship, filters', /^used by \d+$/.test(usedBy) && regionUses.includes('Revenue Treemap (Distribution Share)') && regionUses.includes('the relationship with region_targets') && regionUses.includes('a filter'), `${usedBy} | ${regionUses}`);
+  check('…and the column headers stay uncluttered', !(await page.$('.modal-dialog thead .d-uses')));
+  await closeDialog();
+  await page.click('.d-visual-container[data-type="chart"]');
+  check('clicking a visual selects it', !!(await page.$('.d-selection-frame')));
   await page.hover('.d-visual-container.d-selected');
   check('the selection outline stays solid under the pointer', (await style('.d-visual-container.d-selected', 'outlineStyle')) === 'solid');
   await blank();
@@ -325,6 +343,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('.modal-dialog .btn-primary');
   await page.waitForSelector('.modal-dialog', { hidden: true });
   check('Get Data adds a typed table', (await tables()).includes('extra'), (await tables()).join(','));
+  await editData('extra');
+  const unused = await page.$$eval('.modal-dialog .d-editdata-meta .d-uses', (s) => s.map((e) => `${e.textContent.trim()}: ${e.title}`).join(' | '));
+  check('…which says nothing uses it yet', unused === 'unused: Nothing uses this table yet', unused);
+  await closeDialog();
 
   // connect two fields from the dialog, then remove the connection
   await editData('regional_metrics');
@@ -468,13 +490,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // the format pane: a section by its title (opened), a setting's control by its label
   const fsec = (title) =>
     page.$$eval('.d-fsec', (ss, t) => {
-      const s = ss.find((x) => x.querySelector('.d-fsec-title').textContent.replace(/[▸▾]/, '').trim() === t);
-      if (s && !s.classList.contains('open')) s.querySelector('.d-fsec-title').click();
+      const s = ss.find((x) => x.querySelector('.d-card-title').textContent.replace(/[▸▾]/, '').trim() === t);
+      if (s && !s.classList.contains('open')) s.querySelector('.d-card-title').click();
       return !!s;
     }, title);
   const fcontrol = (title, label, fn, arg) =>
     page.$$eval('.d-fsec', (ss, t, l, f, a) => {
-      const s = ss.find((x) => x.querySelector('.d-fsec-title').textContent.replace(/[▸▾]/, '').trim() === t);
+      const s = ss.find((x) => x.querySelector('.d-card-title').textContent.replace(/[▸▾]/, '').trim() === t);
       const row = [...s.querySelectorAll('.d-frow')].find((r) => r.querySelector('.d-flabel')?.textContent === l);
       return new Function('row', 'a', `return (${f})(row, a)`)(row, a);
     }, title, label, fn.toString(), arg);
@@ -607,7 +629,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // drags a field (or, with no field, a whole table) from the Data pane onto slot i
   const dropChip = (table, field, i) => page.evaluate((t, f, i) => {
     const node = [...document.querySelectorAll('.d-table-node')].find((n) => n.querySelector('.d-table-name').textContent === t);
-    const src = f ? [...node.querySelectorAll('.d-field-item')].find((n) => n.querySelector('.d-field-name').textContent === f) : node.querySelector('.d-table-header');
+    const src = f ? [...node.querySelectorAll('.d-field-item')].find((n) => n.querySelector('.d-field-name').textContent === f) : node.querySelector('.d-card-head');
     const dt = new DataTransfer();
     src.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
     const target = document.querySelectorAll('.d-slots .d-well-box')[i];
@@ -627,10 +649,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('bound slots show what they are bound to', bound[0].val === 'regional_metrics.revenue' && bound[1].val.startsWith('regional_metrics'), JSON.stringify(bound.map((x) => x.val)));
   const headerPayload = await page.evaluate(() => {
     const dt = new DataTransfer();
-    document.querySelector('.d-table-header').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+    document.querySelector('.d-table-node .d-card-head').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
     return dt.getData('application/x-dashier-field');
   });
   check('a table can be dragged from the Data pane too', headerPayload === JSON.stringify({ table: 'regional_metrics' }), headerPayload);
+  const offered = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    document.querySelector('.d-table-node .d-card-head').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+    // a drop target that takes the drag claims its dragover
+    const takes = (el) => !el.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return [takes(document.querySelector('.d-slots .d-well-box')), takes(document.querySelector('.d-filters-pane .d-well-box'))].join();
+  });
+  check('…which a text box\'s variable takes, and a well that needs a field (a filter) never offers to', offered === 'true,false', offered);
   // a text field in a text box: counted to start, and also its minimum, maximum, most common, first or last
   await dropChip('regional_metrics', 'quarter', 0);
   await waitText('Revenue 4,');
@@ -726,7 +756,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(200);
   check('changing a field redraws', (await drawing()) !== pieBefore);
   await page.click('.d-subtab-btn:nth-child(2)');
-  const sections = await page.$$eval('.d-fsec-title', (ts) => ts.map((t) => t.textContent.replace(/[▸▾]/, '').trim()));
+  const sections = await page.$$eval('.d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent.replace(/[▸▾]/, '').trim()));
   check('format tab offers Data labels for a pie', sections.includes('Data labels') && !sections.includes('Bars'), sections.join(','));
   await page.waitForSelector('.d-chart-widget .d-legend span');
   check('a pie lists its slices in the standard legend', !(await page.$('.c-legend')) && (await page.$$eval('.d-chart-widget', (ws) => ws[0].querySelectorAll('.d-legend span').length)) > 0);
@@ -740,12 +770,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   check('…and the chart beside it keeps its full height', beside.svg && beside.h > 100, JSON.stringify(beside));
   // a section's switch turns it off; a changed section shows a dot and resets in one click
-  const legendSwitch = () => page.$$eval('.d-fsec', (ss) => ss.find((x) => x.querySelector('.d-fsec-title').textContent.includes('Legend')).querySelector('.d-fsec-head .d-switch').click());
+  const legendSwitch = () => page.$$eval('.d-fsec', (ss) => ss.find((x) => x.querySelector('.d-card-title').textContent.includes('Legend')).querySelector('.d-card-head .d-switch').click());
   await legendSwitch();
   await sleep(100);
   check('a section switch turns the legend off', !(await page.$$eval('.d-chart-widget', (ws) => ws[0].querySelector('.d-legend'))));
-  const legendChanged = await page.$$eval('.d-fsec', (ss) => !!ss.find((x) => x.querySelector('.d-fsec-title').textContent.includes('Legend')).querySelector('.d-fchanged'));
-  await page.$$eval('.d-fsec', (ss) => ss.find((x) => x.querySelector('.d-fsec-title').textContent.includes('Legend')).querySelector('.d-freset').click());
+  const legendChanged = await page.$$eval('.d-fsec', (ss) => !!ss.find((x) => x.querySelector('.d-card-title').textContent.includes('Legend')).querySelector('.d-fchanged'));
+  await page.$$eval('.d-fsec', (ss) => ss.find((x) => x.querySelector('.d-card-title').textContent.includes('Legend')).querySelector('.d-freset').click());
   await sleep(100);
   check('…marks the section changed, and its reset brings the legend back at the bottom', legendChanged && !!(await page.$$eval('.d-chart-widget', (ws) => ws[0].querySelector('.d-chart-body.legend-bottom .d-legend'))));
   // colors: each slice is listed with its palette color, and a picked one recolors it
@@ -760,7 +790,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('Colors lists every slice and a picked color recolors its slice', swatches > 1 && override === '#ff0000', `${swatches} rows; --series-1: ${override}`);
   // search narrows the pane to matching settings
   await page.type('.d-ftools input[type="search"]', 'units');
-  const matching = await page.$$eval('.d-fsec-title', (ts) => ts.map((t) => t.textContent.replace(/[▸▾]/, '').trim()));
+  const matching = await page.$$eval('.d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent.replace(/[▸▾]/, '').trim()));
   check('searching the format pane shows only matching settings', matching.join() === 'Values', matching.join());
   await page.$eval('.d-ftools input[type="search"]', (i) => {
     i.value = '';
@@ -908,6 +938,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('.d-slicer-clear');
   await sleep(100);
   check('…and clearing it shows every date again', (await unitsTotal()) === allUnits, String(await unitsTotal()));
+  // grouped by month and set to Between, it still picks dates (never number boxes) on two lines where one is too narrow
+  await pickMenu('.d-wells-container .d-pill', 'Month');
+  await page.click('.d-subtab-btn:nth-child(2)'); // Format
+  await fpick('Slicer', 'Style', 'Between');
+  await page.waitForSelector('.d-slicer input[type="date"]');
+  const kinds = await page.$$eval('.d-slicer .d-filter-range input', (is) => is.map((i) => i.type).join());
+  await page.$eval('.d-slicer input[type="date"]', (i) => { i.value = '2024-01-01'; i.dispatchEvent(new Event('change', { bubbles: true })); });
+  await sleep(150);
+  check('a date slicer grouped by month and set to Between picks a from–to range of dates', kinds === 'date,date' && (await unitsTotal()) === sliced, `${kinds} · ${await unitsTotal()} of ${allUnits}`);
+  const rows = await page.$$eval('.d-slicer .d-filter-range label', (ls) => new Set(ls.map((l) => Math.round(l.getBoundingClientRect().top))).size);
+  const fits = await page.$$eval('.d-slicer .d-filter-range input', (is) => is.every((i) => i.scrollWidth <= i.clientWidth + 1));
+  check('…its From and To dates show whole (side by side, or on two lines)', fits, `${rows} line(s)`);
+  await page.click('.d-subtab-btn:nth-child(1)'); // Build
   await page.keyboard.press('Delete');
 
   // printing: Ctrl+P lays out every page (off screen) and goes straight to the browser's print dialog
@@ -926,6 +969,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => dispatchEvent(new Event('afterprint')));
   await page.waitForSelector('.d-print-view', { hidden: true });
   check('closing the dialog leaves the editor as it was', !!(await page.$('.ed-topbar')) && !!(await page.$('.mode-edit')));
+  // printing from the browser's own menu: just the sheet, as a phone shows it, until the dialog closes
+  const topbarShown = () => page.$eval('.ed-topbar', (e) => getComputedStyle(e).display !== 'none');
+  await page.evaluate(() => dispatchEvent(new Event('beforeprint')));
+  const menuPrintsSheet = !(await topbarShown()) && !!(await page.$('.ed-root.mode-sheet'));
+  await page.evaluate(() => dispatchEvent(new Event('afterprint')));
+  check('printing from the browser menu prints the sheet alone, and the editor comes back after', menuPrintsSheet && (await topbarShown()) && !(await page.$('.mode-sheet')));
 
   // ── quick measures ─────────────────────────────────────────────────────────
   await page.click('.d-add-page-btn');
@@ -933,7 +982,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const measureMenu = async (table, item, measure) => {
     const target = measure
       ? await page.evaluateHandle((m) => [...document.querySelectorAll('.d-measure-item')].find((x) => x.querySelector('.d-field-name').textContent === m), measure)
-      : (await page.$$('.d-table-header'))[(await tables()).indexOf(table)];
+      : (await page.$$('.d-table-node .d-card-head'))[(await tables()).indexOf(table)];
     await target.click({ button: 'right' });
     await page.waitForSelector('.d-context-menu');
     await page.$$eval('.d-context-menu button', (b, re) => b.find((x) => new RegExp(re).test(x.textContent)).click(), item);
@@ -1018,15 +1067,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const chrome = () => page.$eval('.ed-topbar', (e) => getComputedStyle(e).backgroundColor);
   const sheet = () => page.$eval('.d-canvas-sheet', (e) => getComputedStyle(e).backgroundColor);
   const chrome0 = await chrome(), sheet0 = await sheet();
-  check('there are no theme presets, only a reset to the default', !(await page.$$eval('.d-visualizations-pane label', (ls) => ls.some((l) => l.textContent === 'Preset'))) && !!(await page.$('.d-section-title .d-link-btn')));
-  await page.select('.d-visualizations-pane .d-format-group select', 'dark');
+  const reportCards = await page.$$eval('.d-visualizations-pane .d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent));
+  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size' && !!(await page.$('.d-visualizations-pane .d-ftools .d-fbtn')), reportCards.join());
+  await fpick('Colors', 'Base', 'Dark');
   await sleep(100);
   check('a dark base restyles the report', (await sheet()) !== sheet0, `${sheet0} → ${await sheet()}`);
   check('…without touching the editor chrome', (await chrome()) === chrome0);
-  await page.click('.d-section-title .d-link-btn');
+  check('…and the Colors card marks the change', !!(await page.$$eval('.d-fsec', (ss) => ss.find((s) => s.querySelector('.d-card-title').textContent.startsWith('Colors'))?.querySelector('.d-fchanged'))));
+  await page.click('.d-visualizations-pane .d-ftools .d-fbtn');
   await sleep(100);
-  check('Reset to default brings the default look back', (await sheet()) === sheet0, await sheet());
-  await page.$eval('.d-swatch input[type="color"]', (i) => { i.value = '#fbf6f0'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  check('Reset brings the default look back', (await sheet()) === sheet0, await sheet());
+  await fcontrol('Colors', 'Page', (row) => { const i = row.querySelector('input[type="color"]'); i.value = '#fbf6f0'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await fsec('Page size');
   // page size: a shape keeps the long side, the orientation turns the page
   const canvasSize = () => page.$$eval('.d-visualizations-pane .d-row .d-input', (is) => is.map((i) => i.value).join('x'));
   const [shapeSelect, turnSelect] = await page.$$('.d-visualizations-pane .d-row .d-well-select');
@@ -1055,17 +1107,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('saved doc keeps the page filter', doc.pages[0].filters?.[0]?.values?.[0] === 'Europe');
     check('saved doc keeps the measures', (doc.measures || []).map((m) => m.name).join() === 'EU revenue,Europe share' && doc.measures[1].a.measure === 'EU revenue', JSON.stringify(doc.measures));
     check('saved doc keeps the theme', doc.theme?.background === '#fbf6f0' && !('branding' in doc.theme), JSON.stringify(doc.theme));
-    check('saved payload is still gzip+base64, stored as columns', doc.sources.regional_metrics.encoding === 'gzip+base64' && doc.sources.regional_metrics.format === 'csv-columns');
+    check('a saved table is just its structure and payload', Object.keys(doc.sources.regional_metrics).sort().join() === 'payload,structure');
     const targets = doc.sources.region_targets;
     // a renamed table is stored as columns from then on: a line per column, its name first
     const unpack = (src) => zlib.gunzipSync(Buffer.from(src.payload, 'base64')).toString().split('\n');
     const header = unpack(targets).map((l) => l.split(',')[0]).join();
-    check('saved column rename is in the structure and in the stored data (now as columns)', targets.structure[0].name === 'zone' && targets.format === 'csv-columns' && header === 'zone,target_revenue', header);
+    check('saved column rename is in the structure and in the stored data (now as columns)', targets.structure[0].name === 'zone' && header === 'zone,target_revenue', header);
     // a table added in the editor is stored as columns too, every value as pasted
     const lines = doc.sources.daily ? unpack(doc.sources.daily).map((l) => l.split(',')) : [];
     const rows = daily.trim().split('\n').map((r) => r.split(','));
-    check('a table added in the editor is saved as columns, value for value', doc.sources.daily?.format === 'csv-columns' && lines.length === 3 &&
-      rows.every((r, i) => r.every((v, j) => lines[j][i] === v)), `${doc.sources.daily?.format} ${lines.length}`);
+    check('a table added in the editor is saved as columns, value for value', !!doc.sources.daily && lines.length === 3 &&
+      rows.every((r, i) => r.every((v, j) => lines[j][i] === v)), `${lines.length} lines`);
     check('saved relationship follows the rename', doc.relationships?.length === 1 && doc.relationships[0].to.field === 'zone', JSON.stringify(doc.relationships));
     check('saved doc dropped the deleted table', !doc.sources.scratch && !doc.sources.extra);
     const note = doc.pages[0].elements.find((e) => e.type === 'markdown');
@@ -1086,7 +1138,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   {
     // a table written as rows here, stored as columns (a line each: its name, then its values)
     const columns = (t) => { const rows = t.trim().split('\n').map((r) => r.split(',')); return rows[0].map((_, i) => rows.map((r) => r[i]).join(',')).join('\n'); };
-    const src = (text, structure) => ({ format: 'csv-columns', encoding: 'gzip+base64', structure, payload: zlib.gzipSync(columns(text)).toString('base64') });
+    const src = (text, structure) => ({ structure, payload: zlib.gzipSync(columns(text)).toString('base64') });
     const card = (id, x, filters) => ({ id, type: 'card', x, y: 0, w: 3, h: 2, sourceId: 'fact_sales', aggregation: { method: 'sum', field: 'revenue' }, format: 'integer', filters });
     const star = {
       format: 'dashier', version: 1, title: 'Star',
@@ -1249,7 +1301,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForSelector('.card-value');
     check('an unencrypted file opens with no password prompt', !(await page.$('.d-password')));
     const plain = await cards(page);
-    await share(page, 'Encrypt with password');
+    await share(page, 'Add a password');
     await page.waitForSelector('.d-password');
     await sleep(100);
     check('the password dialog opens with its first field focused', await page.evaluate(() => document.activeElement === document.querySelector('.d-password input')));
@@ -1260,7 +1312,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     let dir = await saveDir(page);
     await submit(page, 's3cret!', 's3cret!');
     const sealed = await download(dir);
-    check('Encrypt with password… saves the file', !!sealed);
+    check('Add a password… saves the file encrypted', !!sealed);
     check('Save writes the document with one-space indents, as build_report.py does', !!sealed && fs.readFileSync(sealed, 'utf8').includes('id="dashier-doc">\n{\n "format"'));
     const doc = sealed && docOf(sealed);
     const e = doc?.encryption || {};
@@ -1288,13 +1340,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       check('the right password opens the report with all its data (a double click opens it once)', (await cards(p3)) === plain, await cards(p3));
       // Export JSON is the hand-over format: plain data even from an encrypted report, valid, and opened with no prompt
       dir = await saveDir(p3);
-      await share(p3, 'Export JSON');
+      await share(p3, 'Export as JSON');
       await p3.waitForSelector('.d-about');
       check('Export JSON from an encrypted report first warns that the data comes out readable', (await p3.$eval('.d-about', (e) => e.textContent)).includes('anyone with the JSON can read the data'));
       await p3.click('.d-about .btn-secondary');
       await sleep(300);
       check('…and Cancel exports nothing', !(await p3.$('.d-about')) && !fs.readdirSync(dir).length);
-      await share(p3, 'Export JSON');
+      await share(p3, 'Export as JSON');
       await p3.waitForSelector('.d-about');
       await p3.click('.d-about .btn-primary');
       const json = await download(dir, '.dashier.json');
@@ -1308,7 +1360,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         const v = execFileSync('python3', ['skill/dashier-report/scripts/validate_dashier.py', html], { encoding: 'utf8' });
         check('…which the validator passes', v.includes('RESULT: PASS'), v.split('\n').filter((l) => l.startsWith('FAIL')).join(' | '));
         // opened into the encrypted report (still unlocked in p3): no prompt, its data, and the password stays set
-        const [chooser] = await Promise.all([p3.waitForFileChooser(), share(p3, 'Open JSON')]);
+        const [chooser] = await Promise.all([p3.waitForFileChooser(), share(p3, 'Replace with JSON')]);
         await chooser.accept([json]);
         await sleep(800);
         check('Open JSON reads it with no password prompt', !(await p3.$('.d-password')) && (await cards(p3)) === plain, await cards(p3));
@@ -1324,13 +1376,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         await p5.goto(URL);
         await p5.waitForSelector('.card-value');
         const before = await cards(p5);
-        const [chooser2] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Open JSON')]);
+        const [chooser2] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Replace with JSON')]);
         await chooser2.accept([old]);
         await p5.waitForSelector('.d-password');
         await p5.click('.d-password .btn-secondary');
         await sleep(500);
         check('Cancel on an encrypted JSON\'s password keeps the report as it was', !(await p5.$('.d-password')) && (await cards(p5)) === before);
-        const [chooser3] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Open JSON')]);
+        const [chooser3] = await Promise.all([p5.waitForFileChooser(), share(p5, 'Replace with JSON')]);
         await chooser3.accept([old]);
         await p5.waitForSelector('.d-password');
         await submit(p5, 'wrong');
@@ -1342,7 +1394,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         await p5.close();
       }
       dir = await saveDir(p3);
-      await share(p3, 'Remove encryption');
+      await share(p3, 'Remove password');
       const opened = await download(dir);
       const back = opened && docOf(opened);
       check('Remove encryption saves the data readable again', !!back && !back.encryption && Object.entries(back.sources).every(([id, s]) => s.payload.length > 20 && zlib.gunzipSync(Buffer.from(s.payload, 'base64')).length > 0), opened);
@@ -1410,7 +1462,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const saved = await download(dir);
       const d = saved && docOf(saved);
       const lines = (id) => zlib.gunzipSync(Buffer.from(d.sources[id].payload, 'base64')).toString().split('\n');
-      check('a pasted JSON table is saved as columns, value for value', !!d && Object.values(d.sources).every((s) => s.format === 'csv-columns') &&
+      check('a pasted JSON table is saved as columns, value for value', !!d &&
         lines('pasted').join('|') === 'k,a,"b, c"|n,1,2.5', d && lines('pasted').join('|'));
       await p7.goto('file:///' + saved.replace(/\\/g, '/'));
       await p7.waitForSelector('.card-value');

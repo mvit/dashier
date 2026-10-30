@@ -3,7 +3,7 @@
  * size, with the report's number formats, without its title and legend (Dashier draws those), and with stacking
  * and areas, which Pele doesn't have.
  */
-import { Area, Label, PAD, SMALL, TICK, TINY, aligned, esc, textAt, group, labelSvg, layoutLabel, measurer, num, pos, pt, seriesColor, sideTitle, svgDocument, tickLabels, valueAxis } from './svg';
+import { Area, Label, PAD, SMALL, TICK, TINY, aligned, esc, textAt, group, labelSvg, layoutLabel, measurer, num, pos, pt, seriesColor, sideTitle, axesSvg, tickLabels, valueAxis } from './svg';
 
 export interface XYSeries {
   name: string;
@@ -340,16 +340,15 @@ export function xyChart(d: XYData) {
         textAt(x, y, TINY, esc(r.label), ` text-anchor="${anchor}" fill="${color}" stroke="var(--_bg)" stroke-width="3" paint-order="stroke"`);
     }
 
-    return svgDocument(
+    return axesSvg(
       'xychart',
       area,
-      (grid ? `<path class="c-grid" d="${grid}" stroke="var(--_a)"/>` : '') +
-        `<g class="c-plot">${areas}${barsOut}${linesOut}</g>` +
-        group(`class="c-ref-lines" font-size="${TINY}"`, refs) +
-        `<path class="c-axis" d="${axisPath}" fill="none" stroke="var(--_b)"/>` +
-        `<g class="c-axis-labels" font-size="${SMALL}" fill="var(--_m)">${labels}</g>` +
-        group(`class="c-axis-titles" font-size="${SMALL}"`, titles) +
-        group(`class="c-data-labels" font-size="${TINY}" fill="var(--_m)"`, outside) +
+      grid,
+      `<g class="c-plot">${areas}${barsOut}${linesOut}</g>` + group(`class="c-ref-lines" font-size="${TINY}"`, refs),
+      axisPath,
+      labels,
+      titles,
+      group(`class="c-data-labels" font-size="${TINY}" fill="var(--_m)"`, outside) +
         group(`class="c-data-labels" font-size="${TINY}" fill="var(--_bg)"`, inside) +
         group(`class="c-point-labels" font-size="${TINY}" fill="var(--_m)"`, pointLabels)
     );

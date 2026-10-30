@@ -2,10 +2,10 @@ import { Component, Show, createSignal } from 'solid-js';
 import { Modal } from './Modal';
 
 /**
- * Asks for the file's password: once to open its data, or twice to encrypt it (`confirm`). `onSubmit` resolves to
- * an error to show (and the dialog stays for another try), or to nothing.
+ * Asks for the file's password: once to open its data, or twice to set one (`confirm`: the dialog's title, "Add a
+ * password"). `onSubmit` resolves to an error to show (and the dialog stays for another try), or to nothing.
  */
-export const PasswordDialog: Component<{ confirm?: boolean; onSubmit: (password: string) => Promise<string | void>; onClose?: () => void }> = (props) => {
+export const PasswordDialog: Component<{ confirm?: string; onSubmit: (password: string) => Promise<string | void>; onClose?: () => void }> = (props) => {
   const [error, setError] = createSignal('');
   // one submit at a time: a double click during the key derivation would run it twice
   let busy = 0;
@@ -25,7 +25,7 @@ export const PasswordDialog: Component<{ confirm?: boolean; onSubmit: (password:
 
   return (
     <Modal class="d-about d-password" onSubmit={submit} ref={(f) => setTimeout(() => f.querySelector('input')?.focus())}>
-      <h3>{props.confirm ? 'Encrypt with password' : 'This report is encrypted'}</h3>
+      <h3>{props.confirm ?? 'This report is encrypted'}</h3>
       {field('Password')}
       <Show when={props.confirm}>
         {field('Password again')}
@@ -38,7 +38,7 @@ export const PasswordDialog: Component<{ confirm?: boolean; onSubmit: (password:
         <Show when={props.onClose}>
           <button type="button" class="btn-secondary" onClick={() => props.onClose!()}>Cancel</button>
         </Show>
-        <button class="btn-primary">{props.confirm ? 'Encrypt' : 'Open'}</button>
+        <button class="btn-primary">{props.confirm ? 'Save with password' : 'Open'}</button>
       </div>
     </Modal>
   );

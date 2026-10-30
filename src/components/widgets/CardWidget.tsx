@@ -4,6 +4,9 @@ import { store } from '../../runtime/store';
 import { formatValue, summaryLabel, withUnits } from '../../runtime/charts';
 
 /** A KPI: one big number with its label underneath, and optionally how it compares ("+6.4% vs FY2024"). */
+/** A visual's placeholder: what to drag in, while editing (blank for readers). */
+export const empty = (hint: string) => <div class="d-chart-empty">{store.editing() ? hint : ''}</div>;
+
 export const CardWidget: Component<{ element: CardElement }> = (props) => {
   const el = () => props.element;
   const field = () => el().aggregation?.field;
@@ -29,7 +32,7 @@ export const CardWidget: Component<{ element: CardElement }> = (props) => {
       class={`d-card-widget ${el().callout?.align === 'left' ? 'left' : ''}`}
       style={{ '--callout-size': el().callout?.size ? `${el().callout!.size}px` : undefined, '--callout-color': el().callout?.color }}
     >
-      <Show when={field() || el().staticValue != null} fallback={<div class="d-chart-empty">{store.editing() ? 'Drag a field here' : ''}</div>}>
+      <Show when={field() || el().staticValue != null} fallback={empty('Drag a field here')}>
         <div class="card-value">{value()}</div>
         <div class="card-title">{label()}</div>
         <Show when={compared()}>

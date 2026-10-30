@@ -4,6 +4,7 @@ import { store } from '../runtime/store';
 import { dragField } from '../runtime/dnd';
 import { isNumericType } from '../types/model';
 import { measureRef } from '../runtime/measures';
+import { Card, Search } from './ui';
 
 /** Tables and their fields. Fields are dragged into visuals; a right-click (or a table's ⋯) offers what can be done with one. */
 export const DataPane: Component<{
@@ -59,59 +60,53 @@ export const DataPane: Component<{
   return (
     <>
       <div class="d-pane-search">
-        <input type="search" placeholder="Search" value={search()} onInput={(e) => setSearch(e.currentTarget.value)} />
+        <Search value={search()} set={setSearch} />
       </div>
 
       <div class="d-tables-tree">
         <For each={Object.keys(store.doc.sources)}>
           {(id) => (
-            <div class="d-table-node">
-              <div
-                class="d-table-header"
-                draggable={true}
-                onDragStart={(e) => dragField(e, { table: id })}
-                onClick={() => setCollapsed({ ...collapsed(), [id]: !collapsed()[id] })}
-                onDblClick={() => props.onEditData(id)}
-                onContextMenu={(e) => openMenu(e, tableMenu(id))}
-              >
-                <span class={`d-chevron ${collapsed()[id] ? '' : 'open'}`}>›</span>
-                <span class="d-table-icon">▦</span>
-                <span class="d-table-name" title={id}>{id}</span>
-                {moreButton(() => tableMenu(id), 'Table options')}
-              </div>
-
-              <Show when={!collapsed()[id]}>
-                <div class="d-columns-list">
-                  <For each={matching(store.doc.sources[id]?.structure || [])}>
-                    {(col) => (
-                      <div class="d-field-item" draggable={true} onDragStart={(e) => dragField(e, { table: id, field: col.name })} onContextMenu={(e) => openMenu(e, fieldMenu(id, col.name))} title={`${col.name} · ${col.type}`}>
-                        <span class="d-field-glyph">{isNumericType(col.type) ? '∑' : col.type === 'datetime' ? '◷' : ''}</span>
-                        <span class="d-field-name">{col.name}</span>
-                        <Show when={links(id, col.name).length}>
-                          <span class="d-link" title={`Related to ${links(id, col.name).join(', ')}`}>⟷</span>
-                        </Show>
-                      </div>
-                    )}
-                  </For>
-                  <For each={matching(store.measuresOf(id))}>
-                    {(m) => (
-                      <div
-                        class="d-field-item d-measure-item"
-                        draggable={true}
-                        onDragStart={(e) => dragField(e, { table: id, field: measureRef(m.name) })}
-                        onDblClick={() => props.onMeasure(id, m.name)}
-                        onContextMenu={(e) => openMenu(e, measureMenu(id, m.name))}
-                        title={`${m.name} · measure`}
-                      >
-                        <span class="d-field-glyph d-measure-glyph">⊞</span>
-                        <span class="d-field-name">{m.name}</span>
-                        {moreButton(() => measureMenu(id, m.name), 'Measure options')}
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
+            <Card
+              class="d-table-node"
+              open={!collapsed()[id]}
+              flip={() => setCollapsed({ ...collapsed(), [id]: !collapsed()[id] })}
+              head={{ draggable: true, onDragStart: (e) => dragField(e, { table: id }), onDblClick: () => props.onEditData(id), onContextMenu: (e) => openMenu(e, tableMenu(id)) }}
+              title={
+                <>
+                  <span class="d-table-icon">▦</span>
+                  <span class="d-table-name" title={id}>{id}</span>
+                </>
+              }
+              actions={moreButton(() => tableMenu(id), 'Table options')}
+            >
+              <For each={matching(store.doc.sources[id]?.structure || [])}>
+                {(col) => (
+                  <div class="d-field-item" draggable={true} onDragStart={(e) => dragField(e, { table: id, field: col.name })} onContextMenu={(e) => openMenu(e, fieldMenu(id, col.name))} title={`${col.name} · ${col.type}`}>
+                    <span class="d-field-glyph">{isNumericType(col.type) ? '∑' : col.type === 'datetime' ? '◷' : ''}</span>
+                    <span class="d-field-name">{col.name}</span>
+                    <Show when={links(id, col.name).length}>
+                      <span class="d-link" title={`Related to ${links(id, col.name).join(', ')}`}>⟷</span>
+                    </Show>
+                  </div>
+                )}
+              </For>
+              <For each={matching(store.measuresOf(id))}>
+                {(m) => (
+                  <div
+                    class="d-field-item d-measure-item"
+                    draggable={true}
+                    onDragStart={(e) => dragField(e, { table: id, field: measureRef(m.name) })}
+                    onDblClick={() => props.onMeasure(id, m.name)}
+                    onContextMenu={(e) => openMenu(e, measureMenu(id, m.name))}
+                    title={`${m.name} · measure`}
+                  >
+                    <span class="d-field-glyph d-measure-glyph">⊞</span>
+                    <span class="d-field-name">{m.name}</span>
+                    {moreButton(() => measureMenu(id, m.name), 'Measure options')}
+                  </div>
+                )}
+              </For>
+            </Card>
           )}
         </For>
       </div>

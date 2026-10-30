@@ -22,8 +22,9 @@ Scripts in `scripts/` (run them, don't retype them):
 | Script | Does |
 |---|---|
 | `get_dashier.py [OUT.html]` | downloads the current Dashier editor (default `dashier.html`), the template a new report is built from |
-| `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (the current editor, downloaded, when none is given; a path or URL otherwise); a source written as `{"file": "data/x.csv"}` is packed as columns (`csv-columns`, gzip+base64) and its `structure` inferred |
+| `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (the current editor, downloaded, when none is given; a path or URL otherwise); a source written as `{"file": "data/x.csv"}` is packed as columns (gzip+base64) and its `structure` inferred, typed as the app types columns (it flags dates that aren't ISO) |
 | `validate_dashier.py OUT.html` | checks the model against its data, every field reference, filter and slicer values (a value that matches nothing empties a visual), text box templates and the grid; exit 0 = no FAIL. `--render` (opt-in, needs Playwright for Python) also opens every page headless and fails visuals that render empty |
+| `dashier_data.py` | not run: the two above read, type, compare and pack values with it, as the app does (keep it next to them) |
 
 ## Rules that are never skipped
 
@@ -126,7 +127,8 @@ because they differ from Power BI's.
   quarter names, periods (`period` by `period_end`), statement lines (`line` by `line_order`), size bands, stages.
   Without one, labels sort as text (put the year first: `2025 Q1`, not `Q1 2025`).
 - **Numbers are plain:** `1234.5`, never `$1,234.50`, `12%` or `1.2K` (those load blank). Percentages as fractions
-  (`0.125`). Dates ISO (`2025-03-31`). Booleans `true`/`false`.
+  (`0.125`). Dates ISO (`2025-03-31`): other forms load, but `03/04/2024` is March or April only by the column's
+  other dates. Booleans `true`/`false` (`1`/`0` and `yes`/`no` load too; any other text loads as false).
 - **Years, ids, codes and zip codes** that are labels are typed `string` (in `structure`), so they never get summed
   or turned into range slicers.
 - **Sort fact rows oldest first** (by period, then by the dimensions), and dimension rows in their natural order.
@@ -297,7 +299,7 @@ Choose the visual by the question:
 | Progress to a goal | `gauge` with `options.min`/`max` | |
 | Detail by two dimensions | `matrix` (rows = hierarchy outer first, columns = a period, values = measures) | measures stay right at subtotals |
 | Look-up rows, reference lists | `table` | aggregate columns to group; `cond: "bars"` or `"scale"` |
-| Let the reader filter | `slicer` on a **dimension** attribute | `dropdown` for many members, `tiles` for few, `range` for numbers, `datePart` for dates |
+| Let the reader filter | `slicer` on a **dimension** attribute | `dropdown` for many members, `tiles` for few, `range` for numbers; for dates, `datePart` to pick years, quarters or months, or no `datePart` (or `range`) to pick from one date to another |
 | Context, interpretation, caveats | `markdown` with bindings | see step 7 |
 
 Visual craft:
@@ -497,8 +499,10 @@ python3 scripts/build_report.py doc.json report.html
 python3 scripts/validate_dashier.py report.html          # fix every FAIL; fix or justify every WARN
 ```
 
-The validator reads the document and the decoded data: it catches broken references, keys that don't match, filter
-and slicer values that match nothing (a visual that would show "—" or nothing), template errors, and overlaps. What
+The validator reads the document and the decoded data, and reads, compares and keys values as the app does: it
+catches broken references, values that load blank (a number, date or true/false the app can't read), keys that don't
+match, filter and slicer values that match nothing (a visual that would show "—" or nothing; `"1.50"` never matches
+1.5), template errors, and overlaps. What
 it can't judge is how the page reads, so before delivering, reread the document as the reader: does each measure
 have a `format` (and money its `units`), does each visual's format suit its numbers (`percent` for fractions), do
 sizes fit their content (a list slicer about one row per 4
@@ -525,7 +529,9 @@ Relationships are filter paths, as in Power BI:
   table leaves it unfiltered (a slicer on one dimension doesn't narrow another dimension's visuals unless a "both"
   relationship links them through a fact).
 - **A slicer** lists the values of its own table's column (`sourceId` + `field`), so put it on the dimension: it
-  lists every member, sorted.
+  lists every member, sorted. A preset pick is its `selection`: `{"values": [...]}` for listed members (a date's
+  buckets with `datePart`: `"2025"`, `"2025 Q1"`, `"2025-01"`), `{"min": 0, "max": 100}` for a `range` of numbers,
+  `{"from": "2025-01-01", "to": "2025-06-30"}` for a date slicer without `datePart` or with `"style": "range"`.
 - **Measures** work in any connected visual and are evaluated in the cell's context (its grouping values and all
   filters, propagated to the measure's table). A grouping field that can't reach the measure's table doesn't split
   it (every bar shows the same value), exactly like Power BI: group by shared dimensions.
@@ -723,15 +729,16 @@ All elements: `id` (unique), `type`, `x` 0..11, `y`, `w` 1..12 (x + w ≤ 12), `
 - **markdown:** `content`, `bindings` (`{table, field, aggregate, format, units, compare}`), `textSize`, `align`.
 
 Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`, `text`, `muted`, `border`,
-`accent`, `palette` [8 colors], `font`, `radius`), `canvas` (`{"width": 1440, "height": 810}`; portrait
+`accent`, `positive` and `negative` (a comparison's good and bad news, set to suit the theme's colors), `palette`
+[8 colors], `font`, `radius`), `canvas` (`{"width": 1440, "height": 810}`; portrait
 `1080×1440`, A4 `1123×794`), `filters` (every page), `relationships`, `measures`, `pages` (`id`, `title`,
 `elements`, `filters`). `report.html#<page id>` opens a page; `#preview` hides the editor; `#fit` fits the page to the window (`#preview,fit` for a report embedded in a frame).
 
 ## Gotchas
 
 - Write every `<` inside the JSON as `\u003c` (`build_report.py` does it). Never touch the packed app.
-- Tables are stored as columns (`"format": "csv-columns"`: one CSV line per column, its name then its values;
-  the only format a file's tables are in). Edit the CSVs
+- A table is its `structure` and its `payload`: gzip+base64 of a CSV with one line per column, its name then its
+  values. Edit the CSVs
   and rerun `build_report.py`; to read a payload in Python: `rows = list(zip(*csv.reader(io.StringIO(gzip.decompress(base64.b64decode(p)).decode()))))`
   (header first), and back: `csv.writer(f).writerows(zip(*rows))` on an `io.StringIO` `f`, then
   `base64.b64encode(gzip.compress(f.getvalue().encode())).decode()`.

@@ -12,13 +12,15 @@ import { renameInTemplate, renderTemplate, templateVariables } from '../src/runt
 import { scatterPoints } from '../src/runtime/draw/scatter';
 import { buildMatrix } from '../src/runtime/matrix';
 import { fitText, layoutLabel, measurer, num, tickLabels, valueAxis } from '../src/runtime/draw/svg';
-import { ColumnTable, cellOf, columnsFromCSVAsync, columnsFromRows } from '../src/runtime/columns';
+import { ColumnTable, cellReader, columnsFromRows, columnsFromText } from '../src/runtime/columns';
 import { gzipSync } from 'node:zlib';
+import { resolveTheme } from '../src/types/model';
+import { reportStyle } from '../src/runtime/theme';
 
 // a payload as a file holds it: base64(gzip(text))
 const compressPayload = async (text: string) => gzipSync(text).toString('base64');
-const columnsFromCSV = (csv: string, structure: ReturnType<typeof inferStructure>) => columnsFromCSVAsync(csv, structure, () => {});
-const get = (t: ColumnTable, field: string, i: number) => cellOf(t.columns[field], i);
+const columnsFromCSV = async (csv: string, structure: ReturnType<typeof inferStructure>) => (await columnsFromText(csv, 'csv', structure)).table;
+const get = (t: ColumnTable, field: string, i: number) => cellReader(t.columns[field])(i);
 import type { ChartElement, DashMeasure } from '../src/types/model';
 import { compileMeasure, isMeasureRef, measureError, measureFormat } from '../src/runtime/measures';
 
@@ -780,6 +782,46 @@ test('CSV: a quote opens a field only at its start; whitespace-only lines are no
   assert.equal(csvHead(csv, 10).total, 3);
   assert.equal(csvHead('a,b\n1,2\n   \n3,4', 10).total, 2);
   assert.deepEqual(parseCSV('a,b\n"x, ""y""",2').map(r => r.a), ['x, "y"']);
+  assert.deepEqual(parseCSV('a,b\n1,2,'), [{ a: '1', b: '2' }], 'a trailing comma is an empty field, not a column');
+  assert.deepEqual(parseCSV('a,b,c\n1,2,').map(r => r.c), ['']);
+  assert.deepEqual(parseCSV('a,b\n"  x  ",y').map(r => r.a), ['x']);
+});
+
+test('CSV: a quoted empty field is empty, never two quote marks, and stays so once stored as columns', async () => {
+  assert.deepEqual(parseCSV('a,b,c\n"",x,""\n"q""z","",""""'), [{ a: '', b: 'x', c: '' }, { a: 'q"z', b: '', c: '"' }]);
+  assert.equal(await columnsText('a,b\n"",1', 'csv'), 'a,\nb,1');
+  assert.deepEqual(parseCSV('a\n"line\nbreak'), [{ a: 'line\nbreak' }], 'an unclosed quote runs to the end');
+  // a field split across read slices (one value of a 70,000-character quoted field)
+  const long = 'x'.repeat(70000) + '""y';
+  assert.equal(parseCSV(`a\n"${long}"`)[0].a, 'x'.repeat(70000) + '"y');
+});
+
+test('CSV: fields read the same however lines end; a file without commas reads in linear time', () => {
+  const rows = (csv: string) => parseCSV(csv).map(r => Object.values(r).join('|'));
+  const want = ['1|5\'10" tall|x, y', '2||'];
+  for (const nl of ['\n', '\r\n', '\r']) assert.deepEqual(rows(['a,b,c', '1,5\'10" tall ,  "x, y"', '2," ",'].join(nl)), want, JSON.stringify(nl));
+  const one = 'v\n' + Array.from({ length: 300_000 }, (_, i) => `value ${i}`).join('\n');
+  const t = performance.now();
+  const r = parseCSV(one);
+  assert.equal(r.length, 300_000);
+  assert.equal(r[299_999].v, 'value 299999');
+  assert.ok(performance.now() - t < 2000, 'no search past the end for every field');
+});
+
+test('theme: good and bad news are the report\'s colors, from its base unless it sets them', () => {
+  const light = resolveTheme(), dark = resolveTheme({ mode: 'dark' }), own = resolveTheme({ positive: '#0a0', negative: '#a00' });
+  assert.notEqual(light.positive, dark.positive, 'each base has its own');
+  assert.deepEqual([own.positive, own.negative], ['#0a0', '#a00']);
+  const vars = reportStyle(own);
+  assert.deepEqual([vars['--r-positive'], vars['--r-negative']], ['#0a0', '#a00'], 'the canvas reads them');
+});
+
+test('sortOrder: blanks and NaN last both ways; ties keep their order', () => {
+  const v = [3, null, NaN, 1, 3, '', 2];
+  assert.deepEqual([...sortOrder(v.length, k => v[k])], [3, 6, 0, 4, 1, 2, 5]);
+  assert.deepEqual([...sortOrder(v.length, k => v[k], true)], [0, 4, 6, 3, 1, 2, 5]);
+  const t = ['Q10', 'Q2', null, 'Q2'];
+  assert.deepEqual([...sortOrder(t.length, k => t[k])], [1, 3, 0, 2]);
 });
 
 test('CSV: repeated headers get their own columns; renaming keeps every header in place', async () => {
@@ -896,6 +938,21 @@ test('pie: slices in date order, the top n keep it, the rest are "Other"', () =>
 
 test('summarizeValue: mode of true/false is a boolean value', () => {
   assert.equal(summarizeValue(3, k => [true, false, true][k], 'mode'), 'true');
+});
+
+test('matrix: sums add up from the finest groups, and past the limit each group reads its rows: the same numbers', () => {
+  const el = (rows: number) => ({ id: 'm', type: 'matrix', x: 0, y: 0, w: 4, h: 4, rows: [{ field: 'id' }], columns: [{ field: 'c' }], values: [{ field: 'v' }, { field: 'v', aggregate: 'avg' }] }) as any;
+  for (const n of [1000, 42_000]) {
+    // n row keys × 101 columns: 42,000 is past the cells worked out to add up
+    const data = Array.from({ length: n }, (_, i) => ({ id: `r${i}`, c: `c${String(i % 101).padStart(3, '0')}`, v: i % 7 }));
+    const m = buildMatrix(el(n), rowsFrame(data));
+    const sum = data.reduce((a, r) => a + r.v, 0);
+    assert.equal(m.cols, 100, 'a column past the first 100 is left out');
+    assert.equal(m.total[m.cols * 2], sum, 'the Total column counts every column');
+    assert.equal(m.total[m.cols * 2 + 1], sum / n);
+    const r = m.rows.find(x => x.key === 'r1')!;
+    assert.deepEqual([r.cells[2], r.cells[3], r.cells[0]], [1, 1, null], `${n}: a row's own column only`);
+  }
 });
 
 test('matrix: rows carry their keys, to sort by', () => {
@@ -1026,6 +1083,17 @@ test('columns: a CSV or JSON being added reads into the same columns', async () 
   const json = await textToColumnsAsync('[{"a":1,"b":"x"},{"a":2,"b":"y"}]', 'json', structure, () => {});
   assert.deepEqual(rowsOf(csv), [[1, 'x'], [2, 'y']]);
   assert.deepEqual(rowsOf(json), rowsOf(csv));
+});
+
+test('columns: one reading gives the table and what is stored, as two readings would', async () => {
+  const structure = [{ name: 'a', type: 'int' as const }, { name: 'b', type: 'string' as const }];
+  for (const [text, format] of [['a,b,c\n1,"x, y",z\n2,,\n""', 'csv'], ['[{"a":1,"b":"x"},{"a":2,"c":true}]', 'json']] as const) {
+    const { table, stored } = await columnsFromText(text, format, structure, undefined, true);
+    assert.equal(stored.join(''), await columnsText(text, format), format);
+    assert.deepEqual(rowsOf(table), rowsOf(await textToColumnsAsync(text, format, structure, () => {})), format);
+    assert.deepEqual(table.names, ['a', 'b'], 'a column the structure lacks is stored but not read');
+  }
+  assert.deepEqual((await columnsFromText('a,b', 'csv', structure)).stored, [], 'nothing stored unless asked');
 });
 
 test('columns: a 200,000-row column is read a slice at a time, never in one block', async () => {

@@ -7,7 +7,7 @@ import { Compare, MatrixElement, MatrixField, MatrixValue } from '../types/model
 import { Frame, reader, subset } from './frames';
 import { datePartLabel, shiftKey } from './dates';
 import { compareText } from './data';
-import { comparison, keyOf, keyReader, pct, summarizeValue } from './charts';
+import { buckets, comparison, keyIndex, keyOf, numberOf, pct, summarizeValue } from './charts';
 import type { MeasureFn } from './measures';
 
 /** Column keys shown at most (the totals still count every column). */
@@ -40,9 +40,10 @@ export interface Matrix {
 }
 
 /** A field's value as a group key (a date as its bucket); blank is ''. */
+const keyIndexOf = (frame: Frame, f: MatrixField) => keyIndex(frame, keyOf(f.field, f.datePart), '');
 function keyTextReader(frame: Frame, f: MatrixField): (k: number) => string {
-  const read = keyReader(frame, keyOf(f.field, f.datePart));
-  return (k) => String(read(k) ?? '');
+  const { names, at } = keyIndexOf(frame, f);
+  return k => names[at[k]];
 }
 
 type MeasureOf = (ref: string) => MeasureFn | null | undefined;
@@ -50,11 +51,16 @@ type MeasureOf = (ref: string) => MeasureFn | null | undefined;
 /** A value over a group of positions of `frame`: a measure worked out on them, or its field summarized. */
 function summarize(frame: Frame, v: MatrixValue, measure: MeasureOf) {
   const fn = measure(v.field);
-  if (fn) return (pos: number[]) => (pos.length ? fn(subset(frame, Int32Array.from(pos))) : null);
+  if (fn) return (pos: ArrayLike<number>) => (pos.length ? fn(subset(frame, Int32Array.from(pos))) : null);
   const read = reader(frame, v.field);
   const method = v.aggregate ?? 'sum';
-  return (pos: number[]) => (!pos.length ? null : method === 'count' ? pos.length : read ? summarizeValue(pos.length, i => read(pos[i]), method) : null);
+  return (pos: ArrayLike<number>) => (!pos.length ? null : method === 'count' ? pos.length : read ? summarizeValue(pos.length, i => read(pos[i]), method) : null);
 }
+
+/** Summaries that add up: a group's is worked out from its subgroups' (see `adds` in buildMatrix). */
+const ADDS = ['sum', 'avg', 'count', 'min', 'max'];
+/** Most cells (finest groups × columns) worked out to add up; past this, every group reads its own rows. */
+const MAX_CELLS = 1 << 22;
 
 /** How a key reads in a header. */
 const keyLabel = (key: string, f: MatrixField) => (key === '' ? '(Blank)' : f.datePart ? datePartLabel(key, f.datePart) : key);
@@ -72,7 +78,6 @@ export function buildMatrix(
   const colFields = el.columns ?? [];
   const values = el.values ?? [];
   const nv = values.length;
-  const all = Array.from({ length: frame.length }, (_, k) => k);
 
   // each value over a group's positions
   const reduce = values.map(v => summarize(frame, v, measure));
@@ -121,15 +126,15 @@ export function buildMatrix(
   let headers: Matrix['headers'] = [];
   let shown: string[][] = [];
   if (colFields.length) {
-    const reads = colFields.map(f => keyTextReader(frame, f));
+    // a row's column is the combination of its keys' numbers (each field's keys numbered once, keyIndex)
+    const idx = colFields.map(f => keyIndexOf(frame, f));
     const keys: string[][] = [];
     const raw = new Int32Array(frame.length);
-    const index = new Map<string, number>();
+    const index = new Map<number, number>();
     for (let k = 0; k < frame.length; k++) {
-      const parts = reads.map(r => r(k));
-      const key = parts.join('\u0000');
+      const key = idx.reduce((a, x) => a * x.names.length + x.at[k], 0);
       let i = index.get(key);
-      if (i === undefined) index.set(key, (i = keys.push(parts) - 1));
+      if (i === undefined) index.set(key, (i = keys.push(idx.map(x => x.names[x.at[k]])) - 1));
       raw[k] = i;
     }
     const sorted = keys.map((_, i) => i).sort((a, b) => {
@@ -156,51 +161,104 @@ export function buildMatrix(
   }
   const totalCol = colFields.length > 0 && el.totals !== false && el.totals !== 'row';
 
+  // rows: groups level by level, each splitting one of the level above. A level's groups are numbered as first seen
+  // (ids[d][k]: row k's group at depth d), each with its key's number in keyIndex's names and its parent group.
+  const n = frame.length, idx = rowFields.map(f => keyIndexOf(frame, f)), last = idx.length - 1;
+  const ids: Int32Array[] = [], keyAt: number[][] = [], kids: number[][][] = [];
+  idx.forEach(({ names, at }, d) => {
+    if (!d) return void (ids.push(at), keyAt.push(names.map((_, i) => i)));
+    const id = new Int32Array(n), key: number[] = [], seen = new Map<number, number>();
+    kids.push(keyAt[d - 1].map(() => []));
+    for (let k = 0; k < n; k++) {
+      const up = ids[d - 1][k], code = up * names.length + at[k];
+      let g = seen.get(code);
+      if (g === undefined) seen.set(code, (g = key.push(at[k]) - 1)), kids[d - 1][up].push(g);
+      id[k] = g;
+    }
+    ids.push(id), keyAt.push(key);
+  });
+  // the finest groups (one, holding every row, without row fields): `adds` values are worked out for these only
+  const leaf = ids[last], leaves = last < 0 ? 1 : keyAt[last].length;
+  const leavesOf = (d: number, g: number): number[] => (d === last ? [g] : kids[d][g].flatMap(c => leavesOf(d + 1, c)));
+  const everyLeaf = Array.from({ length: leaves }, (_, l) => l);
+  // a group's rows, in order (for values that don't add up), from one counting sort per level
+  const posAt: Int32Array[][] = [];
+  let all: Int32Array | undefined;
+  const allRows = () => (all ??= Int32Array.from({ length: n }, (_, k) => k));
+  const rowsOf = (d: number, g: number) => (d < 0 ? allRows() : (posAt[d] ??= buckets(ids[d], keyAt[d].length))[g]);
+
+  // A value that adds up (a sum, count or average; a minimum or maximum of numbers) is summed once per finest group
+  // and column (slot `cols`: rows in no column shown, which count in the Total column), then a group's cell (column s,
+  // or −1: all of them) adds up its finest groups': no row is read twice, however many levels and columns there are.
+  const W = cols + 1;
+  const adds = values.map(v => {
+    const m = v.aggregate ?? 'sum', read = reader(frame, v.field);
+    if (measure(v.field) || !ADDS.includes(m) || leaves * W > MAX_CELLS) return null;
+    // a minimum or maximum of text is text (summarizeValue)
+    for (let k = 0; read && (m === 'min' || m === 'max') && k < n; k++) {
+      const x = read(k);
+      if ((typeof x === 'string' && x !== '') || typeof x === 'boolean') return null;
+    }
+    const C = new Float64Array(leaves * W), S = new Float64Array(leaves * W), LO = new Float64Array(leaves * W).fill(Infinity), HI = new Float64Array(leaves * W).fill(-Infinity);
+    for (let k = 0; k < n; k++) {
+      const j = (leaf ? leaf[k] : 0) * W + (colOf[k] < 0 ? cols : colOf[k]);
+      const x = m === 'count' ? 0 : read ? numberOf(read(k)) : NaN;
+      if (x !== x) continue;
+      C[j]++, (S[j] += x), x < LO[j] && (LO[j] = x), x > HI[j] && (HI[j] = x);
+    }
+    return (ls: number[], s: number) => {
+      let c = 0, sum = 0, lo = Infinity, hi = -Infinity;
+      for (const l of ls)
+        for (let t = Math.max(s, 0); t <= (s < 0 ? cols : s); t++) {
+          const j = l * W + t;
+          (c += C[j]), (sum += S[j]), (lo = Math.min(lo, LO[j])), (hi = Math.max(hi, HI[j]));
+        }
+      return !c ? null : m === 'count' ? c : m === 'sum' ? sum : m === 'avg' ? sum / c : m === 'min' ? lo : hi;
+    };
+  });
+  /** Value i of a group (its finest groups `ls`, its rows `rows`) in column s (−1: all). */
+  const valueAt = (i: number, ls: number[], rows: () => ArrayLike<number>, s: number) => (adds[i] ? adds[i]!(ls, s) : reduce[i](rows()));
+
   // a 100% share is of the value's grand total; of a zero total, it's blank
-  const grand = values.map((v, i) => (pct(v.showAs) ? Number(reduce[i](all)) : 1));
-  const cellsOf = (pos: number[], path: string) => {
+  const grand = values.map((v, i) => (pct(v.showAs) ? Number(valueAt(i, everyLeaf, allRows, -1)) : 1));
+  const cellsOf = (ls: number[], rows: () => ArrayLike<number>, path: string) => {
     const out: Cells = new Array((cols + (totalCol ? 1 : 0)) * nv).fill(null);
-    const put = (c: number, group: number[], col: string) => values.forEach((v, i) => {
-      let x = reduce[i](group);
+    // the group's rows by column (for values that don't add up)
+    let byCol: number[][] | undefined;
+    const inCol = (c: number) => {
+      if (!byCol) {
+        const r = rows();
+        byCol = Array.from({ length: cols }, () => []);
+        for (let j = 0; j < r.length; j++) if (colOf[r[j]] >= 0) byCol[colOf[r[j]]].push(r[j]);
+      }
+      return byCol[c];
+    };
+    const put = (c: number, s: number, group: () => ArrayLike<number>, col: string) => values.forEach((v, i) => {
+      let x = valueAt(i, ls, group, s);
       if (other[i]) x = comparison(x, other[i]!(path, col), v.compare!.show)?.d ?? null;
       out[c * nv + i] = typeof x === 'number' ? (grand[i] ? x / grand[i] : null) : x;
     });
-    if (!colFields.length) put(0, pos, '');
+    if (!colFields.length) put(0, -1, rows, '');
     else {
-      const buckets: number[][] = Array.from({ length: cols }, () => []);
-      for (const k of pos) if (colOf[k] >= 0) buckets[colOf[k]].push(k);
-      buckets.forEach((b, c) => put(c, b, shown[c].join('\u0000')));
-      if (totalCol) put(cols, pos, '*');
+      for (let c = 0; c < cols; c++) put(c, c, () => inCol(c), shown[c].join('\u0000'));
+      if (totalCol) put(cols, -1, rows, '*');
       for (const i of runs) for (let c = 1; c < cols; c++) out[c * nv + i] = Number(out[(c - 1) * nv + i] ?? 0) + Number(out[c * nv + i] ?? 0);
     }
     return out;
   };
 
-  // rows: a tree of groups, each level splitting the one above
-  type Group = { key: string; pos: number[]; children: Map<string, Group> };
-  const reads = rowFields.map(f => keyTextReader(frame, f));
-  const top = new Map<string, Group>();
-  if (reads.length)
-    for (let k = 0; k < frame.length; k++) {
-      let level = top;
-      for (const read of reads) {
-        const key = read(k);
-        let g = level.get(key);
-        if (!g) level.set(key, (g = { key, pos: [], children: new Map() }));
-        g.pos.push(k);
-        level = g.children;
-      }
-    }
-  const toRows = (groups: Map<string, Group>, depth: number, parent: string): MatrixRow[] => {
-    const rows = [...groups.values()]
-      .sort((a, b) => cmpOf(rowFields[depth])(a.key, b.key))
-      .map(g => {
-        const path = parent + '\u0000' + g.key;
-        return { path, key: g.key, label: keyLabel(g.key, rowFields[depth]), depth, children: toRows(g.children, depth + 1, path), cells: cellsOf(g.pos, path) };
+  const toRows = (d: number, groups: number[], parent: string): MatrixRow[] => {
+    const rows = groups
+      .map(g => ({ g, key: idx[d].names[keyAt[d][g]] }))
+      .sort((a, b) => cmpOf(rowFields[d])(a.key, b.key))
+      .map(({ g, key }) => {
+        const path = parent + '\u0000' + key;
+        const children = d < last ? toRows(d + 1, kids[d][g], path) : [];
+        return { path, key, label: keyLabel(key, rowFields[d]), depth: d, children, cells: cellsOf(leavesOf(d, g), () => rowsOf(d, g), path) };
       });
     if (!colFields.length) for (const i of runs) rows.forEach((r, k) => k && (r.cells[i] = Number(rows[k - 1].cells[i] ?? 0) + Number(r.cells[i] ?? 0)));
     return rows;
   };
 
-  return { headers, cols, totalCol, rows: toRows(top, 0, ''), total: cellsOf(all, '') };
+  return { headers, cols, totalCol, rows: last < 0 ? [] : toRows(0, keyAt[0], ''), total: cellsOf(everyLeaf, allRows, '') };
 }

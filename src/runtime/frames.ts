@@ -5,8 +5,8 @@
  * Plain field names read the frame's own table; "table.field" reads a joined one.
  */
 import { DashFilter } from '../types/model';
-import { Column, ColumnTable, cellOf, columnsFromRows } from './columns';
-import { filterTest, keyText } from './data';
+import { Column, ColumnTable, cellReader, columnsFromRows } from './columns';
+import { filterTest, isBlank, keyText } from './data';
 import { inferStructure } from './hydrate';
 
 type Row = Record<string, unknown>;
@@ -39,8 +39,10 @@ function locate(f: Frame, field: string): [Part, Column] | null {
   return col ? [f.joined[t], col] : null;
 }
 
-const readAt = ([{ ids }, col]: [Part, Column]): ((k: number) => unknown) =>
-  ids ? (k) => (ids[k] < 0 ? null : cellOf(col, ids[k])) : (k) => cellOf(col, k);
+const readAt = ([{ ids }, col]: [Part, Column]): ((k: number) => unknown) => {
+  const read = cellReader(col);
+  return ids ? k => (ids[k] < 0 ? null : read(ids[k])) : read;
+};
 
 /** Reads a field by frame position; null when the frame has no such field. */
 export function reader(f: Frame, field: string) {
@@ -63,7 +65,7 @@ export const subset = (f: Frame, positions: Int32Array) =>
  * For a dictionary column (dates, repeated text): its words and each frame row's code (−1 = none), so work that
  * depends only on the value is done once per word, not once per row. Null for other columns.
  */
-function codesOf(f: Frame, field: string): { words: string[]; code: (k: number) => number } | null {
+export function codesOf(f: Frame, field: string): { words: string[]; code: (k: number) => number } | null {
   const at = locate(f, field);
   if (at?.[1].kind !== 'dict') return null;
   const [{ ids }, { codes, words }] = at as [Part, { codes: Uint32Array; words: string[] }];
@@ -110,12 +112,12 @@ export function frameRows(f: Frame, start = 0, end = f.length): Row[] {
  * match only, so a repeated key never repeats rows. The other table's fields read as "name.field".
  */
 export function joinFrame(left: Frame, leftKey: string, right: ColumnTable, rightKey: string, name: string, lookup = false): Frame {
-  const rk = right.columns[rightKey];
+  const rk = right.columns[rightKey] && cellReader(right.columns[rightKey]);
   const lk = reader(left, leftKey);
   const byKey = new Map<string, number[]>();
   if (rk)
     for (let r = 0; r < right.length; r++) {
-      const v = cellOf(rk, r);
+      const v = rk(r);
       if (v == null || v === '') continue;
       const key = keyText(v);
       const list = byKey.get(key);
@@ -143,17 +145,31 @@ export function joinFrame(left: Frame, leftKey: string, right: ColumnTable, righ
 }
 const NONE = [-1];
 
-/** Distinct non-blank values of a field, as strings (dictionary columns answer from their dictionary). */
+/** How many of the frame's rows are blank in a field (null or empty), read from its column. */
+export function blanksOf(f: Frame, field: string): number {
+  const read = reader(f, field);
+  let n = 0;
+  for (let k = 0; read && k < f.length; k++) n += +isBlank(read(k));
+  return n;
+}
+
+/** Distinct non-blank values of a field, as `key` names them (dictionary columns: each word named once). */
 export function distinctOf(f: Frame, field: string, key: (v: unknown) => string = String): string[] {
-  const at = locate(f, field);
-  if (!at) return [];
-  const [part, col] = at;
-  if (col.kind === 'dict' && !part.ids && key === String) return col.words.filter(w => w !== '');
-  const read = readAt(at);
+  const d = codesOf(f, field);
   const seen = new Set<string>();
-  for (let k = 0; k < f.length; k++) {
-    const v = read(k);
-    if (v != null && v !== '') seen.add(key(v));
+  if (d) {
+    const hit = new Uint8Array(d.words.length);
+    for (let k = 0; k < f.length; k++) {
+      const c = d.code(k);
+      if (c >= 0) hit[c] = 1;
+    }
+    d.words.forEach((w, c) => hit[c] && w !== '' && seen.add(key(w)));
+  } else {
+    const read = reader(f, field);
+    for (let k = 0; read && k < f.length; k++) {
+      const v = read(k);
+      if (v != null && v !== '') seen.add(key(v));
+    }
   }
   return [...seen];
 }

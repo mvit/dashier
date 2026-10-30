@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { gzipAsync } from '@gfx/zopfli';
 import pack85 from './pack85.cjs';
+import zipDir from './zip.mjs';
+import shortenClasses from './classes.mjs';
 
 // Runs the packed app code. Indirect eval keeps it out of the DOM, so the page HTML that
 // "Save" rewrites never contains a second copy of the code.
@@ -16,7 +18,7 @@ const LOADER =
 /**
  * Post-processes the single-file build: the inlined (already minified) app script and stylesheet become
  * base85(gzip(css + js)) in a data block (pack85.cjs), started by LOADER. The stylesheet is installed as an adopted
- * sheet, which keeps it out of the DOM. Output: dist/dashier.html.
+ * sheet, which keeps it out of the DOM. Output: dist/dashier.html, copied to site/ with the skill zipped beside it.
  */
 function packScript(): Plugin {
   return {
@@ -35,9 +37,12 @@ function packScript(): Plugin {
       if (/\bimport\.meta\b|^\s*(import|export)\b/m.test(js)) throw new Error('[dashier] bundle must be a plain script (iife)');
       const styles = [...html.matchAll(/<style rel="stylesheet"[^>]*>([\s\S]*?)<\/style>/g)];
       if (styles.length !== 1) throw new Error(`[dashier] expected one inlined stylesheet, found ${styles.length}`);
-      const css = styles[0][1];
+      // the editor's own class names, shortened in the stylesheet and the code (classes.mjs); the map is for the tests
+      const short = shortenClasses(styles[0][1], js, __dirname);
+      const css = short.css;
+      fs.writeFileSync(path.join(dist, 'dashier.classes.json'), JSON.stringify(short.map, null, 1));
 
-      const code = `{const s=new CSSStyleSheet;s.replaceSync(${JSON.stringify(css)});document.adoptedStyleSheets=[s]}\n${js}`;
+      const code = `{const s=new CSSStyleSheet;s.replaceSync(${JSON.stringify(css)});document.adoptedStyleSheets=[s]}\n${short.js}`;
       // zopfli: still plain gzip for DecompressionStream, about 4% smaller than zlib -9; costs build time only
       const packed = pack85.encode(Buffer.from(await gzipAsync(code, { numiterations: 15 })));
       html = html.replace(scripts[0][0], () => '').replace(styles[0][0], () => '');
@@ -45,6 +50,10 @@ function packScript(): Plugin {
 
       fs.writeFileSync(path.join(dist, 'dashier.html'), html);
       fs.rmSync(input);
+      // the site (published as is): the editor, and the skill as a zip
+      const site = path.resolve(__dirname, 'site');
+      fs.copyFileSync(path.join(dist, 'dashier.html'), path.join(site, 'dashier.html'));
+      fs.writeFileSync(path.join(site, 'dashier-report-skill.zip'), zipDir(path.resolve(__dirname, 'skill/dashier-report'), 'dashier-report'));
       const kb = (n: number) => (n / 1024).toFixed(1) + ' KB';
       console.log(`[dashier] js+css ${kb(code.length)} -> gzip+base85 ${kb(packed.length)}; dist/dashier.html ${kb(Buffer.byteLength(html))}`);
     }
@@ -58,7 +67,9 @@ export default defineConfig({
     // one inlined script: there are no chunks to preload
     modulePreload: { polyfill: false },
     minify: 'terser',
-    terserOptions: { compress: { passes: 2, pure_getters: true, unsafe_arrows: true }, mangle: { toplevel: true }, format: { comments: false } },
+    // no pure_getters: in Solid a property read is how a computation subscribes (props, store fields), so one whose
+    // value is unused, as in createMemo(() => (props.rows, new Map())), must stay
+    terserOptions: { compress: { passes: 2, unsafe_arrows: true }, mangle: { toplevel: true }, format: { comments: false }, ecma: 2020 },
     rollupOptions: { output: { format: 'iife', inlineDynamicImports: true } }
   }
 });
