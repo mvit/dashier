@@ -623,6 +623,11 @@ const openFile = async (p, file) => {
   });
   let mx = await matrix();
   check('a matrix lays out its rows, columns and totals', mx.head.join('|') === 'Quarter|Europe|Total' && mx.rows.length === 4 && mx.rows[0][0] === 'Q1' && mx.total[0] === 'Total', JSON.stringify(mx));
+  const pinned = await page.$eval('.d-matrix', (t) => {
+    const css = (e) => getComputedStyle(e), corner = css(t.querySelector('thead th')), total = t.querySelector('tfoot th'), cell = t.querySelector('tfoot td');
+    return corner.position === 'sticky' && corner.left === '0px' && !!total && +css(total).zIndex > +css(cell).zIndex;
+  });
+  check('a matrix scrolled sideways keeps its corner and Total label in place, over the cells', pinned);
   check('…every cell summed, with a Total column and row', mx.rows[0][1] === mx.rows[0][2] && mx.total[1] === mx.total[2] && mx.total[1] !== '', JSON.stringify(mx.total));
   await drag('regional_metrics', 'region', 0);
   await page.waitForFunction((sel) => [...document.querySelectorAll(sel)].at(-1).querySelectorAll('.d-matrix tbody tr:not(.d-spacer)').length === 8, {}, tiles);

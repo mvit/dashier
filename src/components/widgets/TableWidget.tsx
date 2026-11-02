@@ -10,6 +10,9 @@ import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, f
 
 type Row = Record<string, any>;
 type Read = (k: number) => unknown;
+/** A cell's text, as a link when it's a web address. */
+const linked = (text: string) => (/^https?:\/\/\S+$/i.test(text) ? <a href={text} target="_blank" rel="noopener">{text}</a> : text);
+
 /** What the table shows: rows read by position (a frame's rows, or one object per group). */
 type View = { length: number; read: (i: number) => Read };
 const nothing: Read = () => undefined;
@@ -204,7 +207,7 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
             <For each={columns()}>
               {(c, i) => (
                 <td class={align(c)} style={condStyle(c.cond, row[i()], ranges()[i()])} onMouseEnter={fullText}>
-                  {cell(row[i()], c)}
+                  {linked(cell(row[i()], c))}
                 </td>
               )}
             </For>
