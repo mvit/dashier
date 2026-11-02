@@ -195,6 +195,9 @@ input[type="search"]:focus { outline: 2px solid var(--selection); outline-offset
 .d-card-head:hover .d-caret { color: var(--ink); }
 .d-card-head:focus-visible { box-shadow: inset 0 0 0 2px var(--selection); }
 .d-card-head[draggable="true"] { cursor: grab; }
+[draggable="true"] { -webkit-touch-callout: none; }
+/* what a finger carries (dnd.ts): above it, since the finger hides what's under it */
+.d-drag-ghost { position: fixed; left: 0; top: 0; z-index: 1000; width: max-content; max-width: 240px; pointer-events: none; transform: translate(-50%, -160%); box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
 .d-caret, .d-pill-caret { width: 14px; flex: none; color: var(--muted); }
 .d-caret::before, .d-pill-caret::before { content: ""; display: block; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
 .open > .d-card-head .d-caret::before, .d-pill-caret::before { transform: rotate(45deg); }

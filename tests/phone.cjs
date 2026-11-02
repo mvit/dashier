@@ -138,6 +138,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // on a tablet the editor stays: two fingers on the view pinch it, wherever they land, and never drag a visual
   {
     const page = await browser.newPage();
+    page.on('dialog', (d) => d.accept()); // reopening after an edit asks first
     await page.setViewport({ width: 1180, height: 820, isMobile: true, hasTouch: true });
     const cdp = await page.createCDPSession();
     const touch = async (type, points) => {
@@ -211,6 +212,51 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await touch('touchMove', [{ x: a.x, y: a.y + 200, id: 1 }]);
     await touch('touchEnd', []);
     check('tablet: one finger still drags a visual, as one undo step', (await placed()) !== start && (await state('Undo')));
+
+    // a field carried from the Data pane to a well: a held finger picks it up, a swipe doesn't
+    await open();
+    const chart = await page.$('.d-visual-container[data-type="chart"]');
+    const spot = await chart.boundingBox();
+    await page.touchscreen.tap(spot.x + 30, spot.y + 14);
+    await sleep(300);
+    const field = await page.evaluateHandle(() => {
+      const el = [...document.querySelectorAll('.d-field-item')].find((e) => e.textContent.trim().endsWith('subcategory'));
+      el.scrollIntoView({ block: 'center' });
+      return el;
+    });
+    await sleep(200);
+    const fb = await field.boundingBox();
+    const from = { x: fb.x + fb.width / 2, y: fb.y + fb.height / 2 };
+    const legend = async () => page.$$eval('.d-field-well', (els) => els.find((e) => /legend/i.test(e.textContent)).querySelector('.d-well-box').textContent);
+    const well = await page.evaluateHandle(() => [...document.querySelectorAll('.d-field-well')].find((e) => /legend/i.test(e.textContent)).querySelector('.d-well-box'));
+    const wb = await well.boundingBox();
+    const to = { x: wb.x + wb.width / 2, y: wb.y + wb.height / 2 };
+    const ghost = () => page.$('.d-drag-ghost');
+
+    await touch('touchStart', [{ ...from, id: 1 }]);
+    await touch('touchMove', [{ x: from.x, y: from.y - 40, id: 1 }]);
+    await sleep(400);
+    check('tablet: a quick swipe on a field picks nothing up', !(await ghost()));
+    await touch('touchEnd', []);
+
+    await touch('touchStart', [{ ...from, id: 1 }]);
+    await sleep(400);
+    check('tablet: holding a field picks it up', !!(await ghost()));
+    await touch('touchMove', [{ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, id: 1 }]);
+    await touch('touchMove', [{ ...to, id: 1 }]);
+    await sleep(50);
+    check('tablet: …the well under the finger lights up', await well.evaluate((e) => e.matches('.over')));
+    await touch('touchEnd', []);
+    await sleep(200);
+    check('tablet: …and letting go drops it there', (await legend()).includes('subcategory'), await legend());
+    check('tablet: …and puts it down', !(await ghost()));
+
+    await touch('touchStart', [{ ...from, id: 1 }]);
+    await sleep(400);
+    await touch('touchMove', [{ x: 300, y: 300, id: 1 }]);
+    await touch('touchEnd', []);
+    await sleep(200);
+    check('tablet: a field dropped outside any well does nothing', !(await ghost()) && (await legend()).includes('subcategory'));
     await page.close();
   }
   await browser.close();
