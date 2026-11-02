@@ -4,24 +4,28 @@ import { hideTip, pinching, showTip } from '../../runtime/tooltip';
 import { observeSize } from '../../runtime/view';
 
 /** Draws a chart's SVG at exactly the space the parent gives it, in the report's font, with its tooltips. */
-export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['tip'] }> = (props) => {
+export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['tip']; minWidth?: number }> = (props) => {
   let host!: HTMLDivElement;
   const [area, setArea] = createSignal({ w: 0, h: 0, font: '' });
 
   onMount(() => {
-    observeSize(host, ([{ contentRect: r }]) => {
-      const w = Math.round(r.width), h = Math.round(r.height);
+    const measure = () => {
+      const w = host.clientWidth, h = host.clientHeight;
       // the report font, so labels are measured as they will show
       const font = getComputedStyle(host).fontFamily;
       setArea(a => (Math.abs(a.w - w) < 2 && Math.abs(a.h - h) < 2 && a.font === font ? a : { w, h, font }));
-    });
+    };
+    measure();
+    observeSize(host, measure);
   });
+
+  const width = () => Math.max(area().w, props.minWidth || 0);
 
   const out = createMemo((): { svg?: string; error?: string } | null => {
     const a = area();
     if (!props.draw || a.w < 40 || a.h < 40) return null;
     try {
-      return { svg: props.draw(a) };
+      return { svg: props.draw({ ...a, w: width() }) };
     } catch (err: any) {
       return { error: String(err?.message || err) };
     }
@@ -41,9 +45,9 @@ export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['t
   onCleanup(hideTip);
 
   return (
-    <div class="d-chart-plot" ref={host} onPointerDown={onMove} onPointerMove={(e) => e.pointerType != 'touch' && onMove(e)} onPointerLeave={(e) => e.pointerType != 'touch' && hideTip()}>
+    <div class="d-chart-plot" style={{ overflow: props.minWidth ? 'auto' : undefined }} tabIndex={props.minWidth ? 0 : undefined} title={props.minWidth && width() > area().w ? 'Scroll horizontally to see all categories' : undefined} ref={host} onPointerDown={onMove} onPointerMove={(e) => e.pointerType != 'touch' && onMove(e)} onPointerLeave={(e) => e.pointerType != 'touch' && hideTip()}>
       <Show when={out()?.svg} fallback={<div class={`d-chart-empty ${out()?.error ? 'd-error' : ''}`}>{out()?.error}</div>}>
-        <div class="d-chart-svg" innerHTML={out()!.svg} />
+        <div class="d-chart-svg" style={{ width: `${width()}px` }} innerHTML={out()!.svg} />
       </Show>
     </div>
   );

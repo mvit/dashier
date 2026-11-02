@@ -1,4 +1,4 @@
-import { Component, For } from 'solid-js';
+import { Component, JSX } from 'solid-js';
 import { store } from '../runtime/store';
 import { resolveCanvas, resolveTheme } from '../types/model';
 import { F, Section, SettingsPane, px, sec } from './FormatPane';
@@ -8,11 +8,11 @@ const COLORS = [
   ['background', 'Page'],
   ['surface', 'Tiles'],
   ['text', 'Text'],
-  ['muted', 'Muted'],
+  ['muted', 'Secondary text'],
   ['border', 'Lines'],
   ['accent', 'Accent'],
-  ['positive', 'Good news'],
-  ['negative', 'Bad news']
+  ['positive', 'Positive'],
+  ['negative', 'Negative']
 ] as const;
 
 /** Page shapes, long side by short side; paper as at 96 px per inch. */
@@ -63,39 +63,35 @@ export const ThemeEditor: Component = () => {
     store.setTheme({ palette: palette.join() === base().palette.join() ? undefined : palette });
   };
 
-  const pageSize = () => (
-    <>
-      <div class="d-row">
-        <Select title="Shape" value={ratio()} options={[['', 'Custom'], ...RATIOS.map(([n]): [string, string] => [n, n])]} set={(v) => v && shape(v)} />
-        <Select title="Orientation" value={portrait() ? 'portrait' : 'landscape'} options={[['landscape', 'Landscape'], ['portrait', 'Portrait']]} set={() => store.setCanvas({ width: size().height, height: size().width })} />
-      </div>
-      <div class="d-row">
-        <For each={['width', 'height'] as const}>
-          {(key) => (
-            <input
-              type="number" class="d-input" min="320" max="7680" step="10" title={`${key[0].toUpperCase() + key.slice(1)} (px)`} value={size()[key]}
-              onChange={(e) => {
-                // a number is kept within 320–7680 px; anything else puts the size back
-                const v = Number(e.currentTarget.value);
-                if (e.currentTarget.value && Number.isFinite(v)) store.setCanvas({ ...size(), [key]: Math.max(320, v) });
-                e.currentTarget.value = String(size()[key]);
-              }}
-            />
-          )}
-        </For>
-      </div>
-    </>
+  // a row each, labeled like every other setting
+  const pageRow = (label: string, render: () => JSX.Element) => ({ kind: 'custom' as const, label, keys: ['canvas'], render, row: true });
+  const pageSide = (key: 'width' | 'height') => (
+    <input
+      type="number" class="d-input" min="320" max="7680" step="10" title={`${key[0].toUpperCase() + key.slice(1)} (px)`} value={size()[key]}
+      onChange={(e) => {
+        // a number is kept within 320–7680 px; anything else puts the size back
+        const v = Number(e.currentTarget.value);
+        if (e.currentTarget.value && Number.isFinite(v)) store.setCanvas({ ...size(), [key]: Math.max(320, v) });
+        e.currentTarget.value = String(size()[key]);
+      }}
+    />
   );
+  const pageRows = () => [
+    pageRow('Shape', () => <Select title="Shape" value={ratio()} options={[['', 'Custom'], ...RATIOS.map(([n]): [string, string] => [n, n])]} set={(v) => v && shape(v)} />),
+    pageRow('Orientation', () => <Select title="Orientation" value={portrait() ? 'portrait' : 'landscape'} options={[['landscape', 'Landscape'], ['portrait', 'Portrait']]} set={() => store.setCanvas({ width: size().height, height: size().width })} />),
+    pageRow('Width', () => pageSide('width')),
+    pageRow('Height', () => pageSide('height'))
+  ];
 
   const sections = (): Section[] => [
     sec('theme-colors', 'Colors', [
-      F.select('Base', 'mode', [[undefined, 'Light'], ['dark', 'Dark'], ['auto', "Viewer's system"]]),
+      F.select('Appearance', 'mode', [[undefined, 'Light'], ['dark', 'Dark'], ['auto', "Viewer's system"]]),
       ...COLORS.map(([key, label]) => F.color(label, key, () => base()[key]))
     ]),
     // unset, a series has the color it's drawn in (a shorter palette repeats)
     sec('theme-series', 'Series colors', base().palette.map((_, i) => F.color(`Series ${i + 1}`, `palette.${i}`, () => store.reportTheme().palette[i % store.reportTheme().palette.length]))),
     sec('theme-font', 'Font and corners', [F.text('Font', 'font', 'System default', false, FONTS), F.range('Corners', 'radius', 0, 24, 1, 0, px)]),
-    sec('theme-page', 'Page size', [{ kind: 'custom', label: 'Page size', keys: ['canvas'], render: pageSize }])
+    sec('theme-page', 'Page size', pageRows())
   ];
 
   return (
@@ -105,7 +101,7 @@ export const ThemeEditor: Component = () => {
       put={put}
       search="Search report settings"
       tools={
-        <button class="d-fbtn" title="Back to the default colors, font, corners and page size" onClick={() => (store.setTheme({}, true), store.setCanvas(resolveCanvas()))}>
+        <button class="btn-secondary" title="Reset report colors, font, corners and page size" onClick={() => (store.setTheme({}, true), store.setCanvas(resolveCanvas()))}>
           Reset
         </button>
       }

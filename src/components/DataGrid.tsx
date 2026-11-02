@@ -70,7 +70,7 @@ export const DataGrid: Component<{
                       <input
                         class="d-name-input"
                         value={c.name}
-                        title="Rename (everywhere it is used)"
+                        title="Rename column throughout the report"
                         spellcheck={false}
                         onChange={(e) => props.onRename!(c.name, e.currentTarget)}
                         onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -79,7 +79,7 @@ export const DataGrid: Component<{
                   </div>
                   <Show when={props.onSortBy}>
                     <div class="d-col-profile">
-                      <select class="d-sortby" title="Order this column's values by another column (axes, legends, matrices, slicers)" onChange={(e) => props.onSortBy!(c.name, e.currentTarget.value)}>
+                      <select class="d-sortby" title="Sort this field by another column throughout the report" onChange={(e) => props.onSortBy!(c.name, e.currentTarget.value)}>
                         <option value="">sorted by itself</option>
                         <For each={props.columns.filter(o => o.name !== c.name)}>{(o) => <option value={o.name} selected={c.sortBy === o.name}>sorted by {o.name}</option>}</For>
                       </select>

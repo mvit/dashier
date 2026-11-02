@@ -1,7 +1,8 @@
 import { Component, For, Index, JSX, Show, createSignal, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { DroppedField, dragField, dropProps } from '../runtime/dnd';
 import { AggregationMethod, Compare, ShowAs, Units, ValueFormat } from '../types/model';
-import { dismiss } from './ContextMenu';
+import { dismiss, menuArea } from './ContextMenu';
 import { SUMMARY_NAMES } from '../runtime/charts';
 import type { DatePart } from '../runtime/dates';
 
@@ -103,16 +104,17 @@ export function compareSections(c: Compare | undefined, onChange: (c?: Compare) 
 /** A drag event handled here: no default action, and no handler further up. */
 const halt = (e: Event) => (e.preventDefault(), e.stopPropagation());
 
-/** The dropdown under a pill. Fixed-positioned so the pane's scrolling and clipping don't cut it off. */
+/** The dropdown under a pill. Fixed-positioned, at the app's root: the pane's scrolling and layer never cut it off. */
 const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () => void; onRename: () => void }> = (props) => {
   let menu!: HTMLDivElement;
   const r = props.anchor.getBoundingClientRect();
+  const area = menuArea();
   const [pos, setPos] = createSignal({ left: r.left, top: r.bottom + 2, width: Math.max(r.width, 210) });
 
   onMount(() => {
     // flip above the pill / pull left when it would run off the window
     const m = menu.getBoundingClientRect();
-    const top = m.bottom > innerHeight - 8 ? Math.max(8, r.top - m.height - 2) : r.bottom + 2;
+    const top = r.bottom + 2 + m.height > area.bottom ? Math.max(area.top, r.top - m.height - 2) : r.bottom + 2;
     const left = Math.min(r.left, innerWidth - m.width - 8);
     setPos(p => ({ ...p, top, left }));
 
@@ -123,30 +125,32 @@ const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () =>
   const pick = (fn: () => void) => () => (fn(), props.onClose());
 
   return (
-    <div class="d-field-menu" ref={menu} style={{ left: `${pos().left}px`, top: `${pos().top}px`, 'min-width': `${pos().width}px` }}>
-      <button class="d-menu-item" onClick={pick(props.item.onRemove)}>Remove field</button>
-      <Show when={props.item.onRename}>
-        <button class="d-menu-item" onClick={pick(props.onRename)}>Rename for this visual</button>
-      </Show>
-      <For each={props.item.sections || []}>
-        {(section) => (
-          <>
-            <div class="d-menu-sep" />
-            <Show when={section.title}>
-              <div class="d-menu-title">{section.title}</div>
-            </Show>
-            <For each={section.options}>
-              {(o) => (
-                <button class={`d-menu-item ${o.checked ? 'checked' : ''}`} onClick={pick(o.onSelect)}>
-                  <span class="d-menu-check">{o.checked ? '✓' : ''}</span>
-                  {o.label}
-                </button>
-              )}
-            </For>
-          </>
-        )}
-      </For>
-    </div>
+    <Portal mount={props.anchor.closest('.ed-root')!}>
+      <div class="d-field-menu" ref={menu} style={{ left: `${pos().left}px`, top: `${pos().top}px`, 'min-width': `${pos().width}px`, 'max-height': `${area.bottom - area.top}px` }}>
+        <button class="d-menu-item" onClick={pick(props.item.onRemove)}>Remove field</button>
+        <Show when={props.item.onRename}>
+          <button class="d-menu-item" onClick={pick(props.onRename)}>Rename for this visual</button>
+        </Show>
+        <For each={props.item.sections || []}>
+          {(section) => (
+            <>
+              <div class="d-menu-sep" />
+              <Show when={section.title}>
+                <div class="d-menu-title">{section.title}</div>
+              </Show>
+              <For each={section.options}>
+                {(o) => (
+                  <button class={`d-menu-item ${o.checked ? 'checked' : ''}`} onClick={pick(o.onSelect)}>
+                    <span class="d-menu-check">{o.checked ? '✓' : ''}</span>
+                    {o.label}
+                  </button>
+                )}
+              </For>
+            </>
+          )}
+        </For>
+      </div>
+    </Portal>
   );
 };
 
@@ -241,7 +245,7 @@ const Pill: Component<{ item: WellItem; well: symbol; index: number; onMove?: (f
         {...drag}
       >
         <span class="d-pill-label">{props.item.label}</span>
-        <span class="d-pill-caret">▾</span>
+        <span class="d-pill-caret" aria-hidden="true" />
         <button class="d-pill-x" title="Remove field" onClick={(e) => (e.stopPropagation(), props.item.onRemove())}>×</button>
       </div>
       <Show when={open()}>

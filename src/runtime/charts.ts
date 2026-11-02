@@ -379,6 +379,8 @@ export interface Tip {
 }
 
 export interface ChartSpec {
+  /** Minimum mobile plot width to keep clustered columns readable; not persisted. */
+  minWidth?: number;
   /** What takes a color, by index: series, slices, groups (the format pane's Colors list). */
   names?: string[];
   /** Draws the chart as SVG at a tile's size; absent when there's nothing to draw. */
@@ -523,6 +525,7 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
   });
 
   return {
+    minWidth: kind === 'bar' || kind === 'combo' ? 90 + cats.length * Math.max(32, (stacked ? 1 : series.filter(s => !s.line).length) * 16) : undefined,
     draw: chart.draw,
     names: vary ? shown : series.map(s => s.name),
     legend:

@@ -5,7 +5,7 @@ import { chartKind } from '../runtime/charts';
 import { ChartType, DashElement, RefLine } from '../types/model';
 import { chartNames } from './widgets/ChartWidget';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
-import { Card, Search, Select } from './ui';
+import { Card, Search, Seg, Select } from './ui';
 
 /**
  * Settings panes: the Format tab (every setting of the selected visual, in sections ordered as the visual reads: its
@@ -26,7 +26,7 @@ export type Field =
   | { kind: 'switch'; label: string; key: string; on?: boolean }
   // `auto`: the color it has while unset
   | { kind: 'color'; label: string; key: string; auto?: () => string }
-  | { kind: 'custom'; label: string; keys: string[]; render: () => JSX.Element };
+  | { kind: 'custom'; label: string; keys: string[]; render: () => JSX.Element; row?: boolean };
 
 export interface Section {
   id: string;
@@ -112,7 +112,7 @@ export const FormatPane: Component = () => {
       F.select('Units', 'units', [[undefined, 'As its measure'], ...UNIT_CHOICES.slice(1)]),
       F.num('Size', 'callout.size', 'fits', 10, 120),
       F.color('Color', 'callout.color'),
-      F.seg('Align', 'callout.align', [[undefined, 'Center'], ['left', 'Left']])
+      F.seg('Align', 'callout.align', [['left', 'Left'], [undefined, 'Center']])
     ]));
     add(t === 'card', sec('subtitle', 'Subtitle and comparison', [F.text('Subtitle', 'subtitle', 'None', true), !!e.compare && F.text('Comparison', 'compare.label', 'vs 2024', true)]));
 
@@ -147,7 +147,7 @@ export const FormatPane: Component = () => {
     add(t === 'table' || t === 'matrix', sec('grid', 'Grid', [
       F.seg('Rows', 'grid.density', [['compact', 'Compact'], [undefined, 'Normal'], ['roomy', 'Roomy']]),
       F.sw('Banded rows', 'grid.banded'),
-      F.seg('Lines', 'grid.lines', [[undefined, 'Rows'], ['both', 'Rows and columns'], ['none', 'None']]),
+      F.seg('Lines', 'grid.lines', [[undefined, 'Rows'], ['both', 'Both'], ['none', 'None']]),
       F.num('Text size', 'grid.textSize', '11.5', 8, 24)
     ]));
     add(t === 'table', sec('totals', 'Totals', [], ['totals', true]));
@@ -235,9 +235,9 @@ export const FormatPane: Component = () => {
       search="Search format settings"
       tools={
         <>
-          <button class="d-fbtn" title="Copy this visual's format" onClick={copy}>Copy</button>
+          <button class="btn-secondary" title="Copy this visual's format" onClick={copy}>Copy</button>
           <button
-            class="d-fbtn"
+            class="btn-secondary"
             title={!copied() ? 'Copy a format first' : copied()!.type === el().type ? 'Paste the copied format here' : `The copied format is a ${copied()!.type}'s`}
             disabled={copied()?.type !== el().type}
             onClick={paste}
@@ -308,11 +308,7 @@ export const SettingsPane: Component<{ sections: Section[]; get: (path: string) 
       case 'select':
         return <Select value={get(f.key)} options={f.options} set={(v) => put(f.key, v)} />;
       case 'seg':
-        return (
-          <div class="d-seg d-fseg">
-            <For each={f.options}>{(o) => <button class={get(f.key) === o[0] ? 'on' : ''} onClick={() => put(f.key, o[0])}>{o[1]}</button>}</For>
-          </div>
-        );
+        return <Seg class="d-fseg" value={get(f.key)} options={f.options} set={(v) => put(f.key, v)} />;
       case 'switch':
         return <Switch on={get(f.key) ?? f.on ?? false} set={(v) => put(f.key, v === (f.on ?? false) ? undefined : v)} />;
       case 'color':
@@ -358,7 +354,7 @@ export const SettingsPane: Component<{ sections: Section[]; get: (path: string) 
           >
             <For each={s.fields}>
               {(f) =>
-                f.kind === 'custom' ? (
+                f.kind === 'custom' && !f.row ? (
                   control(f)
                 ) : (
                   <div class="d-frow">

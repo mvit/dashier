@@ -5,7 +5,7 @@ import { DashFilter, isNumericType } from '../types/model';
 import { DatePart, DateUnit, datePartKey, datePartLabel } from '../runtime/dates';
 import { ClearFilterIcon } from './icons';
 import { pickSummary } from '../runtime/data';
-import { Card, Check, RangeInputs, Search, Select } from './ui';
+import { Card, Check, RangeInputs, Search, Seg, Select } from './ui';
 
 // a date filter keeps a range, the last n days/weeks/months/years, or picked years, quarters or months
 const DATE_MODES = [['range', 'Range', 'From one date to another'], ['last', 'Last', 'The last n days, weeks, months or years'], ['year', 'Year', 'Pick years'], ['quarter', 'Qtr', 'Pick quarters'], ['month', 'Month', 'Pick months']];
@@ -94,7 +94,7 @@ const FilterCard: Component<{ scope: FilterScope; index: number; filter: DashFil
       actions={
         <>
           <Show when={summary()}>
-            <button class="d-filter-x" title="Clear the filter" onClick={() => update({ values: [], from: undefined, to: undefined, last: undefined, min: undefined, max: undefined })}>
+            <button class="d-filter-x" title="Clear filter" onClick={() => update({ values: [], from: undefined, to: undefined, last: undefined, min: undefined, max: undefined })}>
               <ClearFilterIcon />
             </button>
           </Show>
@@ -104,9 +104,7 @@ const FilterCard: Component<{ scope: FilterScope; index: number; filter: DashFil
     >
       <Switch fallback={checklist()}>
         <Match when={date()}>
-          <div class="d-seg d-filter-mode">
-            <For each={DATE_MODES}>{([m, name, tip]) => <button data-mode={m} title={tip} class={mode() === m ? 'on' : ''} onClick={() => setMode(m)}>{name}</button>}</For>
-          </div>
+          <Seg class="d-filter-mode" value={mode()} options={DATE_MODES.map(([m, name, tip]) => [m, name, tip] as const)} set={setMode} />
           <Switch fallback={range('date', ['from', 'to'])}>
             <Match when={f().datePart}>{checklist()}</Match>
             <Match when={f().last}>

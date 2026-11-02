@@ -4,6 +4,15 @@ import { Component, For, Show, createSignal, onCleanup } from 'solid-js';
 export const MAC = /Mac|iP(hone|ad|od)/.test(navigator.userAgent);
 export const MOD = MAC ? '⌘' : 'Ctrl+';
 
+/** Where menus may go: between the top bar and the page tabs, or the window's edges where those aren't shown. */
+export const menuArea = () => {
+  const bar = (selector: string) => {
+    const r = document.querySelector(selector)?.getBoundingClientRect();
+    return r?.height ? r : null;
+  };
+  return { top: (bar('.ed-topbar')?.bottom ?? 0) + 8, bottom: (bar('.d-bottom-pages-bar')?.top ?? innerHeight) - 8 };
+};
+
 export interface MenuItem {
   label: string;
   onSelect: () => void;
@@ -17,31 +26,37 @@ export interface MenuItem {
 /** A line between groups of items. */
 export type MenuEntry = MenuItem | '-';
 
-const [menu, setMenu] = createSignal<{ x: number; y: number; items: MenuEntry[]; placed?: boolean } | null>(null);
+/** `above` and `right`: where it ends when it doesn't fit below or after its button; `anchor`: that button, which closes it again. */
+type Place = { x: number; y: number; above?: number; right?: number; anchor?: Element };
+const [menu, setMenu] = createSignal<(Place & { items: MenuEntry[]; placed?: boolean }) | null>(null);
 
 /** Opens the app's one context menu at the pointer (or at `at`, e.g. under a ⋯ button). */
-export function openMenu(e: MouseEvent, items: MenuEntry[], at?: { x: number; y: number }) {
+export function openMenu(e: MouseEvent, items: MenuEntry[], at?: Place) {
   e.preventDefault();
   e.stopPropagation();
-  setMenu({ x: at?.x ?? e.clientX, y: at?.y ?? e.clientY, items });
+  setMenu({ ...at, x: at?.x ?? e.clientX, y: at?.y ?? e.clientY, items });
 }
 
-/** Opens the menu under the element that was clicked (a ⋯ button). */
+/** Opens the menu under the element that was clicked (a ⋯ button), or over it if there's no room; a second click closes it. */
 export const openMenuBelow = (e: MouseEvent, items: MenuEntry[]) => {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  openMenu(e, items, { x: r.left, y: r.bottom + 2 });
+  const anchor = e.currentTarget as HTMLElement, r = anchor.getBoundingClientRect();
+  if (menu()?.anchor === anchor) {
+    e.stopPropagation();
+    setMenu(null);
+  } else openMenu(e, items, { x: r.left, y: r.bottom + 2, above: r.top - 2, right: r.right, anchor });
 };
 
 /**
- * Closes an open menu on a pointer down outside the `inside` elements, Escape (which goes no further), a scroll or a
+ * Closes an open menu on a pointer down or scroll outside the `inside` elements, Escape (which goes no further) or a
  * resize, until the owner is disposed. Returns the listeners' signal, for more of them.
  */
 export function dismiss(inside: Node[], close: () => void): AbortSignal {
   const ac = new AbortController();
   const o = { capture: true, signal: ac.signal };
-  addEventListener('pointerdown', (e) => !inside.some(n => n.contains(e.target as Node)) && close(), o);
+  const outside = (e: Event) => !inside.some(n => n.contains(e.target as Node)) && close();
+  addEventListener('pointerdown', outside, o);
   addEventListener('keydown', (e) => e.key === 'Escape' && (e.stopPropagation(), close()), o);
-  addEventListener('scroll', close, o);
+  addEventListener('scroll', outside, o);
   addEventListener('resize', close, o);
   onCleanup(() => ac.abort());
   return ac.signal;
@@ -53,12 +68,13 @@ export const ContextMenuHost: Component = () => {
   const place = (node: HTMLDivElement) => {
     const close = () => setMenu(null);
     // a blur caught on the way down would be any field's: only the window's own counts
-    addEventListener('blur', close, { signal: dismiss([node], close) });
+    addEventListener('blur', close, { signal: dismiss([node, menu()?.anchor].filter((n) => !!n), close) });
     queueMicrotask(() => {
       const m = menu();
       if (!m || m.placed) return;
       const { width, height } = node.getBoundingClientRect();
-      setMenu({ ...m, x: Math.max(4, Math.min(m.x, innerWidth - width - 4)), y: Math.max(4, Math.min(m.y, innerHeight - height - 4)), placed: true });
+      const area = menuArea();
+      setMenu({ ...m, x: Math.max(4, m.x + width > innerWidth - 4 ? (m.right ?? innerWidth - 4) - width : m.x), y: Math.max(area.top, m.y + height > area.bottom ? (m.above ?? area.bottom) - height : m.y), placed: true });
     });
   };
 
@@ -68,7 +84,7 @@ export const ContextMenuHost: Component = () => {
         <div
           class="d-context-menu"
           ref={place}
-          style={{ left: `${m().x}px`, top: `${m().y}px`, visibility: m().placed ? 'visible' : 'hidden' }}
+          style={{ left: `${m().x}px`, top: `${m().y}px`, 'max-height': `${menuArea().bottom - menuArea().top}px`, visibility: m().placed ? 'visible' : 'hidden' }}
           onContextMenu={(e) => e.preventDefault()}
         >
           <For each={m().items}>

@@ -10,7 +10,7 @@ return).
 
 The report page has a fixed size (default 1440×810, set under **Page size** when nothing is selected; stored as
 `canvas`). It is never reflowed to fit the window (except on a phone, below): zoom it with a trackpad pinch or the
-status bar at the bottom of the window (slider, −/+, **Fit width**, **Fit page**). The browser's own zoom (Ctrl/⌘
+status bar at the bottom of the window (the slider, or the percentage's menu: **Fit width**, **Fit page** and set sizes). The browser's own zoom (Ctrl/⌘
 +/−/0, Ctrl + wheel) resizes the editor UI as usual. Pan with the scrollbars, by dragging the background, or with
 Space + drag or the middle button. The page grows taller if visuals run past the bottom. A `#preview` URL hash opens
 straight into preview, `#<page id>` opens a page and `#fit` fits the page to the window (combine them:
@@ -40,7 +40,7 @@ filter; editing is for wider windows.
   Grid and Totals on tables and matrices). Search finds a setting by name, a switch in a card's header turns it on or
   off, a dot marks what you changed and ↺ resets a card. **Copy** and **Paste** carry one visual's look to another of
   the same type, never its fields or text.
-- **Data pane**: a card per table; its fields are dragged into visuals and onto the Filters pane's wells. *Get data*
+- **Data pane**: a card per table; its fields are dragged into visuals and onto the Filters pane's wells. *Import data*
   takes a dropped or browsed CSV/JSON file (or pasted text), previews it with each column's type (click a type badge
   to change it; hover a column for its counts), and loads it under the name you give. A table's **⋯** (or right-click,
   or double-click) → **Edit data…**:
@@ -59,7 +59,7 @@ filter; editing is for wider windows.
     relationships and visuals stay, and columns it already had keep their types. Before replacing, columns the new data
     lacks are flagged with the visuals and relationships that use them; new columns are just listed.
   - The same menu deletes a table. A ⟷ marks related fields in the pane.
-- **Measures** (a table's ⋯ → New measure…): a named number, no formulas. Either summarize a field (Sum, Average,
+- **Measures** (a table's ⋯ → Create measure…): a named number, no formulas. Either summarize a field (Sum, Average,
   Count…, optionally only rows where a field is certain values) or calculate with two values (measures, field sums or
   numbers: + − × ÷ or % difference). Give it a format and display units once, and every visual that uses it shows
   them. Drag a measure onto values, columns, a card or a text variable; it's worked out for each bar, table row group
@@ -124,7 +124,7 @@ bar). Deselect everything to see the report's settings, in the same cards as a v
 dark or viewer's-system base, then page, tiles, text, muted, lines, accent, and the good-news and bad-news colors of
 comparisons; each "Auto", its base's, until you set it), **Series colors** (8), **Font and corners**, and **Page size**.
 Search, the changed dot and ↺ work as in the Format pane; **Reset** puts everything back. Corners are square by
-default, and no visual has an outer border. It's stored under `theme` (and `canvas`) in the document; see the guide at
+default, and every visual has a 1 px frame in the report's Lines color. It's stored under `theme` (and `canvas`) in the document; see the guide at
 the top of the file.
 
 ## Build a report with an LLM agent

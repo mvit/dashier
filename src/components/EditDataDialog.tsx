@@ -1,6 +1,7 @@
 import { Component, For, JSX, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
+import { Seg } from './ui';
 import { DashRelationship, FieldType, isNumericType } from '../types/model';
 import { DataGrid } from './DataGrid';
 import { frameRows } from '../runtime/frames';
@@ -44,11 +45,11 @@ const RelCard: Component<{
         <span />
         {select('d-rel-table d-rel-table-select', 'Other table', props.d.table, Object.keys(store.doc.sources).filter(t => t !== props.table), 'Choose a table…', (table) => props.set({ table }), (t) => `▦ ${t}`)}
         {select('d-rel-select d-rel-mine', `Column of ${props.table}`, props.d.mine, fields(props.table), 'Choose a column…', (mine) => props.set({ mine }))}
-        {select('d-rel-card', 'Cardinality: read from the data, as Power BI does', props.d.card, CARDS.map(c => c[0]), '', (card) => props.set({ card: card as Card }), (c) => CARDS.find(x => x[0] === c)![1])}
+        {select('d-rel-card', 'Relationship type, detected from the data', props.d.card, CARDS.map(c => c[0]), '', (card) => props.set({ card: card as Card }), (c) => CARDS.find(x => x[0] === c)![1])}
         {select('d-rel-select d-rel-field', 'Column of the other table', props.d.field, fields(props.d.table), 'Choose a column…', (field) => props.set({ field }))}
       </div>
       <div class="d-rel-bottom">
-        <select class="d-rel-select d-rel-dir" title="Cross filter direction" disabled={props.d.card === '1:1'} onChange={(e) => props.set({ both: e.currentTarget.value === 'both' })}>
+        <select class="d-rel-select d-rel-dir" title="Filter direction" disabled={props.d.card === '1:1'} onChange={(e) => props.set({ both: e.currentTarget.value === 'both' })}>
           <option value="single" selected={!props.d.both}>{props.d.card === '1:1' ? 'Filters both ways' : props.flow}</option>
           <option value="both" selected={props.d.both}>Filters both ways</option>
         </select>
@@ -157,15 +158,8 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
     );
   };
 
-  const tabBtn = (t: Tab, label: string, count?: number) => (
-    <button class={`d-dtab ${tab() === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-      {label}
-      {count != null && <span class="d-dtab-count">{count}</span>}
-    </button>
-  );
-
   return (
-    <Modal class="d-editdata" onClose={props.onClose}>
+    <Modal class={`d-editdata ${tab() === 'data' ? 'd-editdata-tall' : ''}`} onClose={props.onClose}>
       <div class="modal-header">
         <div class="d-editdata-title">
           <span class="d-editdata-icon">▦</span>
@@ -183,7 +177,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
               {((kb) => (kb === kb ? `${kb.toFixed(1)} KB stored` : 'compressing…'))(src() ? payloadSize(src().payload) / 1024 : 0)}
               {/* what uses the table (each column's uses on hover), and the columns nothing uses */}
               {' · '}
-              <span class="d-uses" title={[...uses()].map(([c, u]) => `${c}: ${u.join(', ')}`).join('\n') || 'Nothing uses this table yet'}>
+              <span class="d-uses" title={[...uses()].map(([c, u]) => `${c}: ${u.join(', ')}`).join('\n') || 'No visuals use this table yet'}>
                 {usedBy() ? `used by ${usedBy()}` : 'unused'}
               </span>
               <Show when={usedBy() && unused().length}>
@@ -196,17 +190,13 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
           </div>
         </div>
         <div class="d-editdata-actions">
-          <button class="btn-secondary d-replace-btn" title="Load an updated CSV or JSON file into this table" onClick={props.onReplace}>
+          <button class="btn-secondary d-replace-btn" title="Update this table from a CSV or JSON file" onClick={props.onReplace}>
             Replace data…
           </button>
-          <button class="btn-close-modal" title="Close (Esc)" onClick={props.onClose}>×</button>
         </div>
       </div>
 
-      <div class="d-dtabs d-dialog-tabs">
-        {tabBtn('data', 'Data')}
-        {tabBtn('relationships', 'Relationships', rels().length)}
-      </div>
+      <Seg class="d-dialog-seg" value={tab()} options={[['data', 'Data'], ['relationships', <>Relationships <span class="d-seg-count">{rels().length}</span></>]]} set={setTab} />
 
       <Show when={error()}>
         <div class="d-form-error d-editdata-error">{error()}</div>
@@ -215,9 +205,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
       <Show when={src()}>
         <Show when={tab() === 'data'}>
           <div class="d-editdata-hint">
-            Click a column name to rename it everywhere it's used. Click a type badge to change how its values are read; the
-            stored data is unchanged, and values that don't fit the type show as blank. Hover a column for its blanks and
-            other counts.
+            Rename columns or change their types here. Updates apply throughout the report; original values are kept.
           </div>
           <div class="modal-body d-editdata-grid">
             <DataGrid
@@ -238,9 +226,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
         <Show when={tab() === 'relationships'}>
           <div class="modal-body d-rels-body">
             <p class="d-editdata-lead">
-              A relationship links a column of <b>{id()}</b> to a column of another table. The one side (unique values, a
-              dimension) filters the many side (its facts), through further relationships too; a visual can use the fields and
-              measures of any connected table.
+              Connect matching columns to use data from both tables in one visual. Choose how filters pass between them.
             </p>
             <Show when={rels().length || adding()} fallback={<div class="d-empty-state">No relationships yet.</div>}>
               <div class="d-rels">
@@ -252,7 +238,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
                       <RelCard table={id()} d={d()} flow={flow(d())} set={(patch) => change(d(), patch)}>
                         <span class="d-rel-meta">
                           <Show when={repeated(d()).length}>
-                            <span class="d-badge warn" title="A one side should have unique values: rows match its first row only">{repeated(d())[0]} repeats values</span>
+                            <span class="d-badge warn" title="This side needs unique values. Duplicate values match only the first row.">{repeated(d())[0]} repeats values</span>
                           </Show>
                           <Show when={store.isNumericRef(id(), r.mine.field) !== store.isNumericRef(r.other.table, r.other.field)}>
                             <span class="d-badge warn">types differ</span>
@@ -299,7 +285,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
                 <span class="d-suggests-label">Suggested</span>
                 <For each={suggestions()}>
                   {(x) => (
-                    <button class="d-suggest" title="Create this relationship (its cardinality read from the data)" onClick={() => ok(store.saveRelationship(relOf({ index: -1, ...x, card: detect(x.mine, x.table, x.field), both: false })))}>
+                    <button class="d-suggest" title="Connect these columns using the detected relationship type" onClick={() => ok(store.saveRelationship(relOf({ index: -1, ...x, card: detect(x.mine, x.table, x.field), both: false })))}>
                       {x.mine} ⟷ {x.table}.{x.field}
                     </button>
                   )}

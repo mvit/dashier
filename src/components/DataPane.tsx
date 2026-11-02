@@ -60,7 +60,7 @@ export const DataPane: Component<{
   return (
     <>
       <div class="d-pane-search">
-        <Search value={search()} set={setSearch} />
+        <Search value={search()} set={setSearch} placeholder="Search fields" />
       </div>
 
       <div class="d-tables-tree">
@@ -112,7 +112,7 @@ export const DataPane: Component<{
       </div>
 
       <div class="d-data-pane-footer">
-        <button class="d-get-data-btn" onClick={props.onGetData}>+ Get data</button>
+        <button class="btn-secondary" onClick={props.onGetData}>+ Import data…</button>
       </div>
     </>
   );

@@ -87,7 +87,7 @@ characters): number formats, chart behavior, filters and templates are all descr
 
 **Take the app from the template, never its document.** `build_report.py` replaces the whole document, so don't
 read the template's pages for ideas. The tutorial in particular is a lesson about the editor, not a report: a tall
-text column on the left of every page, one editor feature per page, numbered page titles, demo tables (`sales`,
+text column on the left of every page, one editor feature per page, demo tables (`sales`,
 `regions`). Copying any of it (its tables, ids, titles, page structure or that text column) makes a worse report.
 An existing report the user wants changed is different: keep its structure unless asked, and change what was asked.
 

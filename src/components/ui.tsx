@@ -30,7 +30,7 @@ export const Card = (p: {
       onClick={p.flip}
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), p.flip())}
     >
-      <span class="d-caret">{p.open ? '▾' : '▸'}</span>
+      <span class="d-caret" aria-hidden="true" />
       <span class="d-card-title">{p.title}</span>
       {/* the actions' clicks are theirs: they don't open or close the card */}
       <span class="d-card-actions" onClick={(e) => e.stopPropagation()} onDblClick={(e) => e.stopPropagation()}>
@@ -53,6 +53,19 @@ export const Select = (p: { class?: string; title?: string; value: unknown; opti
   );
 };
 
+/** A segmented control: picks one of `options`, each [value, label, its tooltip]. */
+export const Seg = <T,>(p: { value: T; options: readonly (readonly [T, JSX.Element, string?])[]; set: (v: T) => void; class?: string }) => (
+  <div class={`d-seg ${p.class ?? ''}`} role="group">
+    <For each={p.options}>
+      {([v, label, tip]) => (
+        <button type="button" title={tip} class={p.value === v ? 'on' : ''} aria-pressed={p.value === v} onClick={() => p.set(v)}>
+          {label}
+        </button>
+      )}
+    </For>
+  </div>
+);
+
 /** A checkbox (or radio) and its label. */
 export const Check = (p: { checked: boolean; set: () => void; radio?: boolean; children: JSX.Element }) => (
   <label class="d-checkbox-label">
@@ -63,7 +76,7 @@ export const Check = (p: { checked: boolean; set: () => void; radio?: boolean; c
 
 /** A search box. */
 export const Search = (p: { value: string; set: (v: string) => void; class?: string; placeholder?: string }) => (
-  <input type="search" class={p.class} placeholder={p.placeholder ?? 'Search'} value={p.value} onInput={(e) => p.set(e.currentTarget.value)} />
+  <input type="search" aria-label={p.placeholder ?? 'Search'} class={p.class} placeholder={p.placeholder ?? 'Search'} value={p.value} onInput={(e) => p.set(e.currentTarget.value)} />
 );
 
 /**

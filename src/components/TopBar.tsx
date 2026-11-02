@@ -36,7 +36,7 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
       if (!file) return;
       try {
         const doc = JSON.parse(await file.text());
-        if (!Array.isArray(doc.pages) || !doc.pages.length) throw new Error('no pages');
+        if (!Array.isArray(doc.pages) || !doc.pages.length) throw new Error('The file contains no report pages');
         store.importDoc({ sources: {}, ...doc });
         notify(`Opened ${file.name}`);
       } catch (err: any) {
@@ -67,45 +67,49 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
           type="text"
           class="ed-title"
           value={store.doc.title}
+          readOnly={store.preview()}
           // the whole title, however long: the field is as wide as its text (up to the space the bar has)
           size={Math.max(8, (store.doc.title || '').length + 1)}
           onInput={(e) => store.setTitle(e.currentTarget.value)}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-          title="Rename dashboard"
+          title={store.preview() ? 'Dashboard title' : 'Rename dashboard'}
         />
       </div>
 
       <div class="ed-group ed-group-right">
+        <Show when={!store.preview()} fallback={
+          <button class="btn-primary" title="Back to the editor (Esc)" onClick={() => store.setPreview(false)}>Done</button>
+        }>
         <div class="ed-btn-cluster">
           <button class="ed-btn ed-btn-icon" title={`Undo (${MOD}Z)`} disabled={!store.canUndo()} onClick={() => store.undo()}><UndoIcon /></button>
           <button class="ed-btn ed-btn-icon" title={`Redo (${MAC ? '⇧⌘Z' : 'Ctrl+Y'})`} disabled={!store.canRedo()} onClick={() => store.redo()}><RedoIcon /></button>
         </div>
 
-        <button class="ed-btn" title="See the report as a recipient will (Esc to return)" onClick={() => store.setPreview(true)}>
+        <button class="btn-secondary" title="View the report without editing controls (Esc to return)" onClick={() => store.setPreview(true)}>
           ▶ Preview
         </button>
 
         <button
-          class="ed-btn ed-btn-primary"
+          class="btn-primary"
           disabled={store.isSaving()}
           title={store.isDirty() ? `Unsaved changes (${MOD}S saves)` : 'Saved'}
           onClick={(e) =>
             openMenuBelow(e, [
               // the file, then printing; its password; the report as JSON, the hand-over format (to people and agents)
               { label: 'Save', kbd: `${MOD}S`, onSelect: () => save() },
-              { label: 'Save as…', hint: 'Save to a new file, and keep working in it', onSelect: () => save(true) },
-              { label: 'Print…', kbd: `${MOD}P`, hint: 'Every page, one per sheet. To make a PDF, choose Save as PDF in the print dialog', onSelect: () => store.print() },
+              { label: 'Save as…', hint: 'Save a new copy and continue editing it', onSelect: () => save(true) },
+              { label: 'Print…', kbd: `${MOD}P`, hint: 'Print all pages, or choose Save as PDF', onSelect: () => store.print() },
               '-',
               ...(store.encrypted()
                 ? [
                     { label: 'Change password…', onSelect: () => setAsking(true) },
-                    { label: 'Remove password', hint: 'Save the data readable again: anyone with the file can open it', onSelect: () => setPassword(null) }
+                    { label: 'Remove password', hint: 'Anyone with the file will be able to read its data', onSelect: () => setPassword(null) }
                   ]
-                : [{ label: 'Add a password…', hint: 'Encrypt the data in the file: it opens only with the password', onSelect: () => setAsking(true) }]),
+                : [{ label: 'Add a password…', hint: 'Require a password to open the report’s data', onSelect: () => setAsking(true) }]),
               '-',
               // from an encrypted report the JSON is readable: App warns first
-              { label: 'Export as JSON', hint: 'The whole report, data included and readable: for agents and other tools', onSelect: () => (store.encrypted() ? props.onExportJSON() : store.exportJSON()) },
-              { label: 'Replace with JSON…', hint: "Open a report's JSON in place of this one (Undo brings this one back)", onSelect: openJSON }
+              { label: 'Export as JSON', hint: 'Export the report and unencrypted data for other tools', onSelect: () => (store.encrypted() ? props.onExportJSON() : store.exportJSON()) },
+              { label: 'Replace with JSON…', hint: "Replace this report with a JSON file. Undo restores it.", onSelect: openJSON }
             ])
           }
         >
@@ -115,6 +119,7 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
             <span class="ed-dirty" />
           </Show>
         </button>
+        </Show>
       </div>
     </header>
   );

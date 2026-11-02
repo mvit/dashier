@@ -24,17 +24,23 @@ export const PasswordDialog: Component<{ confirm?: string; onSubmit: (password: 
   const field = (placeholder: string) => <input type="password" class="d-input" placeholder={placeholder} required />;
 
   return (
-    <Modal class="d-about d-password" onSubmit={submit} ref={(f) => setTimeout(() => f.querySelector('input')?.focus())}>
-      <h3>{props.confirm ?? 'This report is encrypted'}</h3>
-      {field('Password')}
-      <Show when={props.confirm}>
-        {field('Password again')}
-        <p><b>If you lose the password, the data cannot be recovered.</b></p>
-      </Show>
-      <Show when={error()}>
-        <p class="d-form-error" role="alert">{error()}</p>
-      </Show>
-      <div class="d-row">
+    <Modal
+      class="d-small d-password"
+      title={props.confirm ?? 'This report is encrypted'}
+      subtitle={props.confirm && 'If you lose the password, the data cannot be recovered.'}
+      onClose={props.onClose}
+      onSubmit={submit}
+      onKeyDown={(e) => e.key === 'Escape' && props.onClose?.()}
+      ref={(f) => setTimeout(() => f.querySelector('input')?.focus())}
+    >
+      <div class="modal-body d-password-body">
+        {field('Password')}
+        <Show when={props.confirm}>{field('Confirm password')}</Show>
+        <Show when={error()}>
+          <p class="d-form-error" role="alert">{error()}</p>
+        </Show>
+      </div>
+      <div class="modal-footer">
         <Show when={props.onClose}>
           <button type="button" class="btn-secondary" onClick={() => props.onClose!()}>Cancel</button>
         </Show>

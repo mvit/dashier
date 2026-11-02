@@ -61,10 +61,8 @@ function createDashboardStore() {
   const phone = matchMedia('(max-width: 639.98px), (pointer: coarse) and (max-height: 500px)');
   const [isPhone, setIsPhone] = createSignal(phone.matches);
   const [preview, setPreviewSignal] = createSignal(hash.includes('preview') || phone.matches);
-  // printing from the browser's own menu (not print mode): the page prints as a phone shows it, the sheet alone
-  const [paper, setPaper] = createSignal(false);
-  addEventListener('beforeprint', () => setPaper(true));
-  addEventListener('afterprint', () => setPaper(false));
+  // a #preview link shows the report alone; Preview from the editor keeps the top bar, with its way back
+  const [bare, setBare] = createSignal(hash.includes('preview'));
   // print mode shows every page as it will print; nothing is editable there
   const [printing, setPrintingSignal] = createSignal(false);
   const editing = () => !preview() && !printing();
@@ -482,7 +480,9 @@ function createDashboardStore() {
     if (on) setSelectedElementId(null);
   };
   const setPrinting = deselecting(setPrintingSignal);
-  const setPreview = deselecting(setPreviewSignal);
+  addEventListener('beforeprint', () => setPrinting(true));
+  addEventListener('afterprint', () => setPrinting(false));
+  const setPreview = deselecting((on) => (setPreviewSignal(on), on || setBare(false)));
   phone.onchange = (e) => (setIsPhone(e.matches), setPreview(e.matches));
 
   /**
@@ -493,7 +493,6 @@ function createDashboardStore() {
     if (printing()) return;
     setPrinting(true);
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    addEventListener('afterprint', () => setPrinting(false), { once: true });
     window.print();
   }
 
@@ -1155,8 +1154,8 @@ function createDashboardStore() {
   }
 
   function checkRelationship(r: { from: End; to: End }, ignoreIndex: number): string | null {
-    if (!hasField(r.from.table, r.from.field) || !hasField(r.to.table, r.to.field)) return 'Pick a field on both sides.';
-    if (r.from.table === r.to.table) return 'Connect fields of two different tables.';
+    if (!hasField(r.from.table, r.from.field) || !hasField(r.to.table, r.to.field)) return 'Choose a column from each table.';
+    if (r.from.table === r.to.table) return 'Choose two different tables.';
     if ((doc.relationships || []).some((o, i) => i !== ignoreIndex && ((sameEnd(o.from, r.from) && sameEnd(o.to, r.to)) || (sameEnd(o.from, r.to) && sameEnd(o.to, r.from))))) {
       return 'Those fields are already connected.';
     }
@@ -1203,7 +1202,7 @@ function createDashboardStore() {
   function renameSource(from: string, to: string): string | null {
     to = to.trim();
     if (!isTable(from)) return 'Unknown table.';
-    if (!to) return 'A table name cannot be empty.';
+    if (!to) return 'Enter a table name.';
     if (to === from) return null;
     if (isTable(to)) return `A table named "${to}" already exists.`;
     pushHistory();
@@ -1246,7 +1245,7 @@ function createDashboardStore() {
     const src = doc.sources[sourceId];
     const i = src?.structure.findIndex(c => c.name === from) ?? -1;
     if (i < 0) return 'Unknown column.';
-    if (!to) return 'A column name cannot be empty.';
+    if (!to) return 'Enter a column name.';
     if (to === from) return null;
     if (src.structure.some(c => c.name === to)) return `"${to}" already exists in ${sourceId}.`;
 
@@ -1396,7 +1395,7 @@ function createDashboardStore() {
     doc,
     editing,
     phone: isPhone,
-    paper,
+    bare,
     preview,
     setPreview,
     printing,

@@ -87,7 +87,7 @@ export const ChartWidget: Component<{ element: ChartElement }> = (props) => {
           <Show when={chartKind(el().chartType) !== 'gauge'} fallback={<Gauge element={el()} frame={rows()} />}>
             {/* every chart's legend is this one: same swatches, font and placement */}
             <div class={`d-chart-body legend-${el().options?.legendPosition || 'bottom'}`}>
-              <ChartHost draw={spec().draw} tip={spec().tip} />
+              <ChartHost draw={spec().draw} tip={spec().tip} minWidth={store.phone() && !store.printing() ? spec().minWidth : 0} />
               <Show when={spec().legend.length}>
                 <div class="d-legend">
                   <For each={spec().legend}>

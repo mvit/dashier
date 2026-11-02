@@ -23,9 +23,13 @@ const track = (onMove: (e: PointerEvent) => void, onEnd: () => void) => {
     onEnd();
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    window.removeEventListener('blur', onUp);
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  window.addEventListener('blur', onUp);
 };
 
 export const Canvas: Component = () => {
@@ -77,8 +81,16 @@ export const Canvas: Component = () => {
     applyZoom(mode === 'width' ? zw : Math.min(zw, zh));
   });
 
+  // A press on a scrollbar stays the browser's: a classic one is past the client area, an overlay one over its edge
+  // (and can hit-test to the visual beneath).
+  const onScrollbar = (e: PointerEvent) => {
+    const r = scrollRef.getBoundingClientRect();
+    return (scrollRef.scrollWidth > scrollRef.clientWidth && e.clientY >= r.top + scrollRef.clientHeight - 10) || (scrollRef.scrollHeight > scrollRef.clientHeight && e.clientX >= r.left + scrollRef.clientWidth - 10);
+  };
+
   /** Pans by dragging: middle button anywhere, Space + drag anywhere, or a plain drag on the background. */
   const startPan = (e: PointerEvent) => {
+    if (onScrollbar(e)) return;
     const onBackground = !(e.target as HTMLElement).closest('.d-visual-container,input,select,textarea,button,a');
     if (!(e.button === 1 || (e.button === 0 && (spaceHeld() || onBackground)))) return;
     e.preventDefault();
@@ -214,7 +226,7 @@ export const Canvas: Component = () => {
   ];
 
   // On a phone the page's slicers live in a drawer, opened from a button at the top (theme.css shows the button, and
-  // hides the slicers in the page, only there): a card each, as filters are, saying what's picked; a lone one is open.
+  // hides the slicers in the page, only there): a card each, as filters are, saying what's picked; a lone one starts open.
   const slicers = () => (currentPage()?.elements.filter(e => e.type === 'slicer') ?? []) as SlicerElement[];
   const [drawer, setDrawer] = createSignal(false);
   const [opened, setOpened] = createSignal(new Set<string>());
@@ -231,6 +243,7 @@ export const Canvas: Component = () => {
       <div
         class={`d-canvas-scroll-container ${spaceHeld() ? 'pan-ready' : ''} ${panning() ? 'panning' : ''}`}
         ref={scrollRef}
+        on:pointerdown={{ capture: true, handleEvent: (e) => { if (onScrollbar(e)) e.stopPropagation(); } }}
         onPointerDown={startPan}
         onMouseDown={(e) => e.button === 1 && e.preventDefault()}
       >
@@ -266,7 +279,7 @@ export const Canvas: Component = () => {
                       onPointerDown={(e) => startDrag(e, elem, 'move')}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (store.editing()) store.setSelectedElementId(elem.id);
+                        if (store.editing() && !(e.target as HTMLElement).closest('button,input,select,textarea,a,label')) store.setSelectedElementId(elem.id);
                       }}
                       onContextMenu={(e) => {
                         if (!store.editing()) return;
@@ -309,7 +322,7 @@ export const Canvas: Component = () => {
       </div>
 
       {/* always there on a phone; with no slicers on the page, there's nothing to open */}
-      <button class={`ed-btn d-drawer-btn ${drawer() ? 'active' : ''}`} disabled={!slicers().length} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
+      <button class={`btn-secondary d-drawer-btn ${drawer() ? 'active' : ''}`} disabled={!slicers().length} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
         Filters
       </button>
       <Show when={slicers().length}>
@@ -318,8 +331,8 @@ export const Canvas: Component = () => {
             <For each={slicers()}>
               {(elem) => (
                 <Card
-                  class={`d-filter-card ${elem.selection ? 'active' : ''}`}
-                  open={opened().has(elem.id) || slicers().length === 1}
+                  class={`d-fsec d-filter-card ${elem.selection ? 'active' : ''}`}
+                  open={opened().has(elem.id) !== (slicers().length === 1)}
                   flip={() => flipSlicer(elem.id)}
                   title={
                     <>
@@ -329,7 +342,7 @@ export const Canvas: Component = () => {
                   }
                   actions={
                     <Show when={elem.selection}>
-                      <button class="d-filter-x" title="Clear the selection" onClick={() => store.setSlicerSelection(currentPage().id, elem.id, undefined)}>
+                      <button class="d-filter-x" title="Clear selection" onClick={() => store.setSlicerSelection(currentPage().id, elem.id, undefined)}>
                         <ClearFilterIcon />
                       </button>
                     </Show>

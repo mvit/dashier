@@ -2,7 +2,7 @@ import { Component, For, Index, Show, createMemo, createSignal } from 'solid-js'
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
-import { Check, Select } from './ui';
+import { Check, Seg, Select } from './ui';
 import { formatValue, summaryLabel, SUMMARY_NAMES, withUnits } from '../runtime/charts';
 import { OPS, compileMeasure, measureError, measureFormat, wheres } from '../runtime/measures';
 import { AggregationMethod, DashMeasure, MeasureOp, MeasureOperand, Units, ValueFormat, isNumericType } from '../types/model';
@@ -109,18 +109,14 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
   );
 
   return (
-    <Modal class="d-measure-dialog" title={existing ? 'Edit measure' : 'New measure'} subtitle={`On ${props.table}`} onClose={props.onClose}>
+    <Modal class="d-measure-dialog" title={existing ? 'Edit measure' : 'Create measure'} subtitle={`Table: ${props.table}`} onClose={props.onClose}>
       <div class="modal-body d-measure-body">
         <label class="d-mfield">
           Name
           <input class="d-input d-measure-name" value={name()} placeholder="e.g. Revenue per user" spellcheck={false} onInput={(e) => setName(e.currentTarget.value)} />
         </label>
 
-        <div class="d-seg">
-          <For each={[['summarize', 'Summarize a field'], ['calculate', 'Calculate']] as const}>
-            {([m, label]) => <button class={mode() === m ? 'on' : ''} onClick={() => setMode(m)}>{label}</button>}
-          </For>
-        </div>
+        <Seg value={mode()} options={[['summarize', 'Summarize a field'], ['calculate', 'Calculate']]} set={setMode} />
 
         <Show when={mode() === 'summarize'}>
           <div class="d-mrow">
@@ -172,7 +168,7 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
             )}
           </Index>
           <Show when={conds().at(-1)?.field}>
-            <button class="d-link-btn d-measure-and" onClick={() => setConds([...conds(), { table: props.table, field: '', values: [] }])}>+ and where…</button>
+            <button class="d-link-btn d-measure-and" onClick={() => setConds([...conds(), { table: props.table, field: '', values: [] }])}>+ Add condition</button>
           </Show>
         </Show>
 
@@ -196,7 +192,7 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
         </label>
 
         <div class={`d-measure-preview ${problem() ? 'muted' : ''}`}>
-          {problem() && name().trim() ? problem() : preview() != null ? <>On all rows of {props.table}: <b>{preview()}</b></> : 'Fill in the measure to see its value.'}
+          {problem() && name().trim() ? problem() : preview() != null ? <>Result for {props.table}: <b>{preview()}</b></> : 'Choose a field or calculation to preview the result.'}
         </div>
         <Show when={error()}>
           <div class="d-form-error">{error()}</div>

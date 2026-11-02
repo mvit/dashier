@@ -1,6 +1,7 @@
 import { clone } from '../runtime/data';
 import { Component, Show, For, createEffect, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
+import { Seg } from './ui';
 import { DroppedField, dropProps } from '../runtime/dnd';
 import { chartKind, summaryLabel, valueLabel } from '../runtime/charts';
 import type { DatePart } from '../runtime/dates';
@@ -230,15 +231,7 @@ export const VisualsPane: Component = () => {
       </div>
 
       <Show when={sel()} fallback={<ThemeEditor />}>
-        <div class="d-subtab-strip">
-          <For each={['Build', 'Format']}>
-            {(t) => (
-              <button class={`d-subtab-btn ${store.visualTab() === t.toLowerCase() ? 'active' : ''}`} onClick={() => store.setVisualTab(t.toLowerCase() as 'build' | 'format')}>
-                {t}
-              </button>
-            )}
-          </For>
-        </div>
+        <Seg class="d-fseg d-visual-seg" value={store.visualTab()} options={[['build', 'Build'], ['format', 'Format']]} set={store.setVisualTab} />
 
         <Show when={store.visualTab() === 'build'}>
           <div class="d-wells-container">

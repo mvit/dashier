@@ -8,7 +8,6 @@ import { FiltersPane } from './components/FiltersPane';
 import { StatusBar } from './components/StatusBar';
 import { PrintView } from './components/PrintView';
 import { MeasureDialog } from './components/MeasureDialog';
-import { Logo } from './components/icons';
 import { ContextMenuHost } from './components/ContextMenu';
 import { AddDataDialog } from './components/AddDataDialog';
 import { EditDataDialog } from './components/EditDataDialog';
@@ -94,10 +93,10 @@ export const App: Component = () => {
 
   return (
     <div
-      class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() ? 'mode-phone' : ''} ${(store.phone() || store.paper()) && !store.printing() ? 'mode-sheet' : ''}`}
+      class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() && !store.printing() ? 'mode-phone mode-sheet' : ''}`}
       data-theme={store.isDark() ? 'dark' : 'light'}
     >
-      <Show when={!store.preview()}>
+      <Show when={!store.bare()}>
         <TopBar onAbout={() => setDialog({ about: true })} onExportJSON={() => setDialog({ exportJSON: true })} />
       </Show>
 
@@ -128,8 +127,8 @@ export const App: Component = () => {
         <PrintView />
       </Show>
 
-      <Show when={store.preview()}>
-        <button class="ed-btn d-exit-preview" title="Back to the editor (Esc)" onClick={() => store.setPreview(false)}>
+      <Show when={store.bare()}>
+        <button class="btn-secondary d-exit-preview" title="Back to the editor (Esc)" onClick={() => store.setPreview(false)}>
           ✎ Edit
         </button>
       </Show>
@@ -140,29 +139,22 @@ export const App: Component = () => {
       <Show when={dialog()?.edit}>
         {(id) => <EditDataDialog id={id()} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
       </Show>
-      {/* About, and the same dialog warning that Export JSON from an encrypted report writes its data readable */}
-      <Show when={dialog()?.about || dialog()?.exportJSON}>
-        <Modal class="d-about" onClose={close}>
-          <Logo size={48} />
-          <Show
-            when={dialog()?.about}
-            fallback={
-              <>
-                <h3>Export readable data?</h3>
-                <p>This report is encrypted, but Export JSON writes every table readable, without the password: anyone with the JSON can read the data.</p>
-                <div class="d-row">
-                  <button class="btn-secondary" onClick={close}>Cancel</button>
-                  <button class="btn-primary" onClick={() => (close(), store.exportJSON())}>Export JSON</button>
-                </div>
-              </>
-            }
-          >
-            <h3>Dashier</h3>
-            <p>A dashboard in one HTML file: the report and its data, for people and LLMs to edit.</p>
-            <p>Made by mvit and Opus 5.5</p>
-            <p>{GITHUB ? <a href={GITHUB} target="_blank" rel="noopener">GitHub</a> : 'GitHub: coming soon'}</p>
-            <button class="btn-primary" onClick={close}>Close</button>
-          </Show>
+      <Show when={dialog()?.about}>
+        <Modal class="d-small d-about" title="Dashier" subtitle="Your report and data in one editable HTML file." onClose={close}>
+          <div class="modal-body">
+            <p>Made by mvit and Opus 5.5 · <a href={GITHUB} target="_blank" rel="noopener">GitHub</a></p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-primary" onClick={close}>Done</button>
+          </div>
+        </Modal>
+      </Show>
+      <Show when={dialog()?.exportJSON}>
+        <Modal class="d-small d-export-warn" title="Export readable data?" subtitle="The JSON file will contain unencrypted data. Anyone with the file can read it without a password." onClose={close}>
+          <div class="modal-footer">
+            <button class="btn-secondary" onClick={close}>Cancel</button>
+            <button class="btn-primary" onClick={() => (close(), store.exportJSON())}>Export JSON</button>
+          </div>
         </Modal>
       </Show>
       <Show when={dialog()?.measure}>{(m) => <MeasureDialog table={m().table} name={m().name} field={m().field} onClose={close} />}</Show>

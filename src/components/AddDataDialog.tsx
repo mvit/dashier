@@ -150,11 +150,11 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
   return (
     <Modal
       class={`d-getdata ${over() ? 'over' : ''}`}
-      title={props.replaceId ? `Replace data · ${props.replaceId}` : 'Get data'}
+      title={props.replaceId ? `Replace data · ${props.replaceId}` : 'Import data'}
       subtitle={
         props.replaceId
-          ? 'Load an updated CSV or JSON file. The table keeps its name, relationships and visuals.'
-          : "Add a table from a CSV or JSON file. It's saved inside this dashboard file."
+          ? 'Choose a CSV or JSON file to update this table. Existing visuals and relationships stay connected.'
+          : "Import a CSV or JSON table. Its data is saved with the report."
       }
       onClose={props.onClose}
       onDragOver={(e) => {
@@ -173,7 +173,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
 
       <div class="modal-body d-getdata-body">
         <Show when={source() === 'none'}>
-          <div class={`d-dropzone ${over() ? 'over' : ''}`} onClick={() => fileInput.click()}>
+          <button type="button" class={`d-dropzone ${over() ? 'over' : ''}`} onClick={() => fileInput.click()}>
             <svg viewBox="0 0 48 48" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14 34H11a8 8 0 0 1-1-15.9A12 12 0 0 1 33.5 15 8.5 8.5 0 0 1 37 34h-3" />
               <path d="M24 40V22M17 29l7-7 7 7" />
@@ -182,16 +182,16 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
               when={busy()}
               fallback={
                 <>
-                  <div class="d-dropzone-title">Drop a CSV or JSON file here</div>
-                  <div class="d-dropzone-sub">
-                    or <span class="d-link-btn">browse your files</span>
-                  </div>
+                  <span class="d-dropzone-title">Drop a CSV or JSON file</span>
+                  <span class="d-dropzone-sub">
+                    or <span class="d-link-btn">choose a file</span>
+                  </span>
                 </>
               }
             >
-              {(b) => <div class="d-dropzone-title">{b().text}</div>}
+              {(b) => <span class="d-dropzone-title">{b().text}</span>}
             </Show>
-          </div>
+          </button>
           <div class="d-or">or</div>
           <button class="btn-secondary d-paste-btn" onClick={startPaste}>
             Paste data
@@ -237,7 +237,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
             when={ready()}
             fallback={
               <div class="d-getdata-empty">
-                {parsed().error ? `Couldn't read this data: ${parsed().error}` : source() === 'paste' ? 'A preview appears here as you paste.' : 'No data rows found in this file.'}
+                {parsed().error ? `Couldn't read this data: ${parsed().error}` : source() === 'paste' ? 'Paste data to see a preview.' : 'No rows found. Choose a file with at least one data row.'}
               </div>
             }
           >
@@ -264,7 +264,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
                 <div class="d-schema-note ok">Same columns as before.</div>
               </Show>
             </Show>
-            <div class="d-getdata-hint">Preview — check each column's type (click its badge to change it).</div>
+            <div class="d-getdata-hint">Check the preview. Click a type badge to change it.</div>
             <DataGrid columns={structure()} rows={preview()} limit={100} onType={(col, t) => setTypes({ ...types(), [col]: t })} stats={stats} />
           </Show>
         </Show>
@@ -289,7 +289,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
         </Show>
         <button class="btn-secondary" onClick={props.onClose}>Cancel</button>
         <button class="btn-primary" disabled={!!busy() || !ready() || !name().trim()} onClick={load}>
-          {busy() ? 'Loading…' : !props.replaceId ? 'Load' : diff().missing.length ? 'Replace anyway' : 'Replace'}
+          {busy() ? 'Importing…' : !props.replaceId ? 'Import' : ready() && diff().missing.length ? 'Replace anyway' : 'Replace data'}
         </button>
       </div>
     </Modal>

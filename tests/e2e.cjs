@@ -1,6 +1,7 @@
 // Drives dist/dashier.html (with the tests/e2e-doc.json report) in headless Chrome/Edge: edit interactions, filters, theming, save -> reload.
 // Usage: npm run build && npm run e2e   (set CHROME_PATH to use a specific browser)
 const launch = require('./browser.cjs');
+const { pathToFileURL } = require('url');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const zlib = require('zlib');
@@ -21,6 +22,19 @@ const check = (name, ok, extra = '') => {
   if (!ok) failures++;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A file just downloaded can be locked for a moment (Windows scans new downloads): these wait it out.
+const settled = async (file) => {
+  for (let i = 0; i < 40; i++) {
+    try { fs.closeSync(fs.openSync(file, 'r+')); return file; } catch { await sleep(250); }
+  }
+  return file;
+};
+const openFile = async (p, file) => {
+  for (let i = 0; ; i++) {
+    try { return await p.goto(pathToFileURL(await settled(file)).href); }
+    catch (e) { if (i > 20 || !/ERR_FILE_NOT_FOUND|ERR_ACCESS_DENIED/.test(e.message)) throw e; await sleep(250); }
+  }
+};
 
 (async () => {
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'dashier-e2e-'));
@@ -67,21 +81,38 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('sheet frame has square corners', (await style('.d-canvas-sheet', 'borderTopLeftRadius')) === '0px');
   check('tiles are square by default', (await style(tiles, 'borderTopLeftRadius')) === '0px');
   check('no type badges on charts or cards', !(await page.$('.chart-type-badge, .card-agg-tag')));
-  const frames = await page.$$eval(tiles, (ts) => ts.map((t) => getComputedStyle(t).borderTopWidth + ' ' + getComputedStyle(t).outlineStyle));
-  check('no visual (chart, card, table, text) has an outer border', frames.every((f) => f === '0px none'), frames.join(' | '));
+  const frames = await page.$$eval(tiles, (ts) => ts.map((t) => [t.dataset.type, getComputedStyle(t).borderTopWidth, getComputedStyle(t).outlineStyle]));
+  check('every visual has a 1px frame', frames.every(([, w, outline]) => w === '1px' && outline === 'none'), frames.join(' | '));
   const sheetW = await page.$eval('.d-canvas-sheet', (e) => e.getBoundingClientRect().width);
   check('preview sheet keeps its fixed size (no reflow to the window)', sheetW === 1440, `${sheetW}px`);
   // zoom scales the whole sheet; the layout inside stays the same
   const tileW = () => page.$eval('.d-visual-container', (e) => e.offsetWidth);
   const tw0 = await tileW();
-  await page.$$eval('.d-zoom .d-status-btn', (bs) => bs.find((b) => b.textContent.trim() === '−').click());
+  // zoom: the slider, and the percentage's menu
+  const zoomMenu = async (label) => {
+    await page.click('.d-zoom-pct');
+    await page.waitForSelector('.d-context-menu');
+    await page.$$eval('.d-context-menu button', (bs, l) => bs.find((b) => b.querySelector('span').textContent === l).click(), label);
+    await sleep(100);
+  };
+  // a menu that doesn't fit below its button opens over it, stays open while it scrolls, and its button closes it
+  await page.click('.d-zoom-pct');
+  await page.waitForSelector('.d-context-menu');
+  await sleep(50);
+  const over = await page.evaluate((m, b) => { const e = document.querySelector(m); e.dispatchEvent(new Event('scroll')); return e.getBoundingClientRect().bottom <= document.querySelector(b).getBoundingClientRect().top; }, '.d-context-menu', '.d-zoom-pct');
+  await sleep(50);
+  check('the zoom menu opens over its button, and scrolling inside it keeps it open', over && !!(await page.$('.d-context-menu')));
+  await page.click('.d-zoom-pct');
+  await sleep(100);
+  check('a second click on its button closes a menu', !(await page.$('.d-context-menu')));
+  await zoomMenu('75%');
   const zoomed = await page.$eval('.d-canvas-sheet', (e) => e.getBoundingClientRect().width);
   check('zooming out scales the sheet without reflowing it', zoomed < 1440 && (await tileW()) === tw0, `${zoomed}px, tile ${await tileW()} vs ${tw0}`);
-  await page.$$eval('.d-zoom .d-status-btn', (bs) => bs.find((b) => b.textContent.includes('Fit page')).click());
+  await zoomMenu('Fit page');
   const fitH = await page.$eval('.d-canvas-sheet', (e) => e.getBoundingClientRect().height);
   const viewH = await page.$eval('.d-canvas-scroll-container', (e) => e.clientHeight);
   check('Fit page fits the whole sheet in the view', fitH <= viewH, `${fitH} of ${viewH}`);
-  await page.$$eval('.d-zoom .d-status-btn', (bs) => bs.find((b) => b.textContent.includes('%')).click());
+  await zoomMenu('100%');
   // a trackpad pinch (ctrlKey wheel, Ctrl not held) scales the sheet; real Ctrl + wheel / Ctrl + = belong to the browser
   const pct = () => page.$eval('.d-zoom-pct', (e) => e.textContent.trim());
   const wheel = () => page.$eval('.d-canvas-scroll-container', (el) => {
@@ -91,7 +122,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   const pinched = await wheel();
   check('a pinch zooms the sheet', pinched && (await pct()) !== '100%', await pct());
-  await page.$$eval('.d-zoom .d-status-btn', (bs) => bs.find((b) => b.textContent.includes('%')).click());
+  await zoomMenu('100%');
   await page.keyboard.down('Control');
   const ctrlWheel = await wheel();
   const ctrlPlus = await page.evaluate(() => {
@@ -119,13 +150,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // the editor is the default; Preview is a button, not a toggle
   await open();
   check('opens in the editor by default', !!(await page.$('.mode-edit')) && !!(await page.$('.d-visualizations-pane')));
-  check('no Edit/Done toggle', !(await page.$$eval('.ed-btn', (b) => b.some((x) => /Done|Edit/.test(x.textContent)))));
-  await page.$$eval('.ed-btn', (b) => b.find((x) => /Preview/.test(x.textContent)).click());
+  check('no Edit/Done toggle', !(await page.$$eval('.ed-topbar button', (b) => b.some((x) => /Done|Edit/.test(x.textContent)))));
+  await page.$$eval('.ed-topbar button', (b) => b.find((x) => /Preview/.test(x.textContent)).click());
   await page.waitForSelector('.mode-preview');
-  check('Preview button hides the chrome', !(await page.$('.ed-topbar')));
-  await page.click('.d-exit-preview');
+  check('Preview hides the panes and keeps the top bar, its title read-only', !(await page.$('.d-visualizations-pane')) && !!(await page.$('.ed-title[readonly]')));
+  await page.$$eval('.ed-topbar button', (b) => b.find((x) => x.textContent.trim() === 'Done').click());
   await page.waitForSelector('.mode-edit');
-  check('exit button returns to the editor', !!(await page.$('.ed-topbar')));
+  check('Done returns to the editor', !!(await page.$('.d-visualizations-pane')));
 
   // ── bottom bars: page tabs scroll, the + stays put; zoom lives in the window-wide status bar ──
   check('zoom controls are in the status bar, not the page tabs', !!(await page.$('.ed-statusbar .d-zoom')) && !(await page.$('.d-bottom-pages-bar .d-zoom')));
@@ -237,7 +268,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('…and the copy can be deleted', (await page.$$(tiles)).length === 7);
   await page.keyboard.press('Escape');
   // Share opens the same menu under the button, with the shortcuts
-  await page.click('.ed-topbar .ed-btn-primary');
+  await page.click('.ed-topbar .btn-primary');
   await page.waitForSelector('.d-context-menu');
   const share = await page.$$eval('.d-context-menu button', (bs) => bs.map((b) => b.textContent));
   // shortcuts as the keyboard writes them: ⌘S on a Mac, Ctrl+S elsewhere
@@ -259,7 +290,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   };
   const editData = async (table) => { await rightClick(table, 'Edit data'); await page.waitForSelector('.modal-dialog'); };
   const closeDialog = async () => { await page.keyboard.press('Escape'); await page.waitForSelector('.modal-dialog', { hidden: true }); };
-  const tab = (n) => page.click(`.d-dtabs .d-dtab:nth-child(${n})`);
+  const tab = (n) => page.click(`.d-editdata .d-seg button:nth-child(${n})`);
   const field = (cls, value) => page.evaluateHandle((c, v) => [...document.querySelectorAll(c)].find((i) => i.value === v), cls, value);
   const retype = async (handle, text) => { await handle.click({ count: 3 }); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
   // a column of the Edit Data grid: its type and its blank count from the header's profile
@@ -331,7 +362,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await blank();
 
   // Get Data adds a table
-  await page.click('.d-get-data-btn');
+  await page.click('.d-data-pane-footer .btn-secondary');
   check('Get Data opens on a file drop zone', !!(await page.$('.d-dropzone')));
   await page.click('.d-paste-btn');
   await page.type('.modal-dialog textarea', 'a,b\n1,2\n3,4');
@@ -345,7 +376,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('Get Data adds a typed table', (await tables()).includes('extra'), (await tables()).join(','));
   await editData('extra');
   const unused = await page.$$eval('.modal-dialog .d-editdata-meta .d-uses', (s) => s.map((e) => `${e.textContent.trim()}: ${e.title}`).join(' | '));
-  check('…which says nothing uses it yet', unused === 'unused: Nothing uses this table yet', unused);
+  check('…which says nothing uses it yet', unused === 'unused: No visuals use this table yet', unused);
   await closeDialog();
 
   // connect two fields from the dialog, then remove the connection
@@ -519,7 +550,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await drag('regional_metrics', 'quarter', 0);
   await drag('regional_metrics', 'revenue', 1);
   await drag('regional_metrics', 'region', 2);
-  await page.click('.d-subtab-btn:nth-child(2)'); // Format
+  await page.click('.d-visual-seg button:nth-child(2)'); // Format
   const stackPicker = await foptions('Bars', 'Stack');
   check('column charts offer side by side, stacked and 100% stacked', stackPicker.join() === 'Side by side,Stacked,100% stacked', stackPicker.join());
   await fpick('Bars', 'Stack', '100% stacked');
@@ -539,7 +570,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // matrix: rows in a hierarchy, columns across, values at every crossing, with totals
   await blank();
   await page.click('.d-vis-icon[title="Add Matrix"]');
-  await page.click('.d-subtab-btn:nth-child(1)'); // Build
+  await page.click('.d-visual-seg button:nth-child(1)'); // Build
   const matrixWells = await page.$$eval('.d-wells-container .d-well-header label', (ls) => ls.map((l) => l.textContent).join());
   check('a matrix has Rows, Columns and Values', matrixWells === 'Rows,Columns,Values', matrixWells);
   await drag('regional_metrics', 'quarter', 0);
@@ -755,7 +786,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await drag('regional_metrics', 'quarter', 0); // the Europe filter leaves one region, so change the category
   await sleep(200);
   check('changing a field redraws', (await drawing()) !== pieBefore);
-  await page.click('.d-subtab-btn:nth-child(2)');
+  await page.click('.d-visual-seg button:nth-child(2)');
   const sections = await page.$$eval('.d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent.replace(/[▸▾]/, '').trim()));
   check('format tab offers Data labels for a pie', sections.includes('Data labels') && !sections.includes('Bars'), sections.join(','));
   await page.waitForSelector('.d-chart-widget .d-legend span');
@@ -807,14 +838,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await blank();
   await page.click('.d-vis-icon[title="Add Line chart"]');
   check('gallery adds a visual when nothing is selected', (await page.$$(tiles)).length === 8);
-  check('no "Add Visual" button', !(await page.$('.ed-insert-group .ed-menu')) && !(await page.$$eval('.ed-btn', (b) => b.some((x) => /Add Visual/.test(x.textContent)))));
+  check('no "Add Visual" button', !(await page.$('.ed-insert-group .ed-menu')) && !(await page.$$eval('.ed-topbar button', (b) => b.some((x) => /Add Visual/.test(x.textContent)))));
   await page.keyboard.press('Delete');
   check('Delete key removes the selected visual', (await page.$$(tiles)).length === 7);
 
   // ── dates, combo, table features, on a page of their own ──────────────────
   let daily = 'day,product,units\n';
   for (let i = 0; i < 6000; i++) daily += `${new Date(Date.UTC(2023, 0, 1) + (i % 600) * 864e5).toISOString().slice(0, 10)},${'ABC'[i % 3]},${(i * 7) % 50 + 1}\n`;
-  await page.click('.d-get-data-btn');
+  await page.click('.d-data-pane-footer .btn-secondary');
   await page.click('.d-paste-btn');
   await page.$eval('.modal-dialog textarea', (t, v) => { t.value = v; t.dispatchEvent(new Event('input', { bubbles: true })); }, daily);
   await page.waitForSelector('.d-getdata .d-grid');
@@ -827,7 +858,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(150);
 
   await page.click('.d-vis-icon[title="Add Line and column chart"]');
-  await page.click('.d-subtab-btn:nth-child(1)'); // Build
+  await page.click('.d-visual-seg button:nth-child(1)'); // Build
   await drag('daily', 'day', 0);
   await drag('daily', 'units', 1);
   await drag('daily', 'units', 2);
@@ -876,7 +907,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await drag('daily', 'units', 2);
 
   // Top N
-  await page.click('.d-subtab-btn:nth-child(2)');
+  await page.click('.d-visual-seg button:nth-child(2)');
   await fsec('Order');
   await fcontrol('Order', 'Top N', (row) => {
     const i = row.querySelector('input');
@@ -885,7 +916,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   await sleep(100);
   check('Top N keeps the largest categories', (await page.$$eval('.d-chart-widget', (ws) => ws.at(-1).querySelectorAll('.c-bars rect').length)) === 3);
-  await page.click('.d-subtab-btn:nth-child(1)');
+  await page.click('.d-visual-seg button:nth-child(1)');
   await blank();
 
   // a big table: only the rows in view are drawn; totals and data bars
@@ -916,17 +947,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const allUnits = await unitsTotal();
   await dropOn('daily', 'day', '.d-filters-pane .d-filter-section:nth-child(1) .d-well-box');
   await page.waitForSelector('.d-filter-mode');
-  await page.click('.d-filter-mode [data-mode="last"]');
+  await page.click('.d-filter-mode button:nth-child(2)');
   await sleep(100);
   // the data ends in 2024, so nothing is in the last 3 months
   const summaryText = await page.$eval('.d-filter-card .filter-type', (e) => e.textContent);
   check('"in the last 3 months" filters out older dates', summaryText === 'Last 3 months' && (await unitsTotal()) < allUnits, `${summaryText} · ${await unitsTotal()} of ${allUnits}`);
 
   // a date slicer grouped by Date picks a from–to range, which filters the page
-  await page.click('.d-filter-mode [data-mode="range"]');
+  await page.click('.d-filter-mode button:nth-child(1)');
   await sleep(100);
   await page.click('.d-vis-icon[title="Add Slicer"]');
-  await page.click('.d-subtab-btn:nth-child(1)'); // Build
+  await page.click('.d-visual-seg button:nth-child(1)'); // Build
   await drag('daily', 'day', 0);
   await pickMenu('.d-wells-container .d-pill', 'Date');
   await page.waitForSelector('.d-slicer input[type="date"]');
@@ -940,7 +971,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('…and clearing it shows every date again', (await unitsTotal()) === allUnits, String(await unitsTotal()));
   // grouped by month and set to Between, it still picks dates (never number boxes) on two lines where one is too narrow
   await pickMenu('.d-wells-container .d-pill', 'Month');
-  await page.click('.d-subtab-btn:nth-child(2)'); // Format
+  await page.click('.d-visual-seg button:nth-child(2)'); // Format
   await fpick('Slicer', 'Style', 'Between');
   await page.waitForSelector('.d-slicer input[type="date"]');
   const kinds = await page.$$eval('.d-slicer .d-filter-range input', (is) => is.map((i) => i.type).join());
@@ -950,8 +981,32 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const rows = await page.$$eval('.d-slicer .d-filter-range label', (ls) => new Set(ls.map((l) => Math.round(l.getBoundingClientRect().top))).size);
   const fits = await page.$$eval('.d-slicer .d-filter-range input', (is) => is.every((i) => i.scrollWidth <= i.clientWidth + 1));
   check('…its From and To dates show whole (side by side, or on two lines)', fits, `${rows} line(s)`);
-  await page.click('.d-subtab-btn:nth-child(1)'); // Build
+  await page.click('.d-visual-seg button:nth-child(1)'); // Build
   await page.keyboard.press('Delete');
+
+  // Scrollbar edge presses must not select/drag a visual beneath an overlay scrollbar.
+  await zoomMenu('100%');
+  const gestures = await page.evaluate(() => {
+    const scroll = document.querySelector('.d-canvas-scroll-container');
+    const sheet = document.querySelector('.d-canvas-sheet');
+    const pointer = (type, x, y) => new PointerEvent(type, { bubbles: true, button: 0, buttons: 1, clientX: x, clientY: y, pointerId: 1 });
+    const r = scroll.getBoundingClientRect(), before = scroll.scrollLeft;
+    scroll.dispatchEvent(pointer('pointerdown', r.left + 30, r.bottom - 5));
+    window.dispatchEvent(pointer('pointermove', r.left + 60, r.bottom - 5));
+    window.dispatchEvent(pointer('pointerup', r.left + 60, r.bottom - 5));
+    const nativeSafe = scroll.scrollLeft === before;
+    const visual = sheet.querySelector('.d-visual-container');
+    const position = visual.getAttribute('style');
+    visual.dispatchEvent(pointer('pointerdown', r.left + 30, r.bottom - 5));
+    window.dispatchEvent(pointer('pointermove', r.left + 90, r.bottom - 5));
+    window.dispatchEvent(pointer('pointerup', r.left + 90, r.bottom - 5));
+    const overlaySafe = scroll.scrollLeft === before && visual.getAttribute('style') === position;
+    sheet.dispatchEvent(pointer('pointerdown', r.left + 40, r.top + 100));
+    window.dispatchEvent(pointer('pointercancel', r.left + 40, r.top + 100));
+    window.dispatchEvent(pointer('pointermove', r.left + 100, r.top + 100));
+    return nativeSafe && overlaySafe && scroll.scrollLeft === before && !scroll.classList.contains('panning');
+  });
+  check('scrollbar gestures and cancelled drags leave visuals and scroll position intact', gestures);
 
   // printing: Ctrl+P lays out every page (off screen) and goes straight to the browser's print dialog
   await page.evaluate(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
@@ -969,12 +1024,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => dispatchEvent(new Event('afterprint')));
   await page.waitForSelector('.d-print-view', { hidden: true });
   check('closing the dialog leaves the editor as it was', !!(await page.$('.ed-topbar')) && !!(await page.$('.mode-edit')));
-  // printing from the browser's own menu: just the sheet, as a phone shows it, until the dialog closes
-  const topbarShown = () => page.$eval('.ed-topbar', (e) => getComputedStyle(e).display !== 'none');
+  // The browser menu follows the same all-pages print path.
   await page.evaluate(() => dispatchEvent(new Event('beforeprint')));
-  const menuPrintsSheet = !(await topbarShown()) && !!(await page.$('.ed-root.mode-sheet'));
+  const menuPrintsAll = await page.evaluate(() => document.querySelectorAll('.d-print-slot').length === document.querySelectorAll('.d-bottom-tab').length);
+  await page.emulateMediaType('print');
+  const printFits = await page.evaluate(() => {
+    const root = document.querySelector('.ed-root');
+    return getComputedStyle(root).overflow === 'visible' && getComputedStyle(root).display === 'block' && root.scrollHeight <= root.clientHeight + 1;
+  });
+  await page.emulateMediaType('screen');
   await page.evaluate(() => dispatchEvent(new Event('afterprint')));
-  check('printing from the browser menu prints the sheet alone, and the editor comes back after', menuPrintsSheet && (await topbarShown()) && !(await page.$('.mode-sheet')));
+  check('browser print includes every page without viewport clipping and returns to the editor', menuPrintsAll && printFits && !(await page.$('.mode-printing')));
 
   // ── quick measures ─────────────────────────────────────────────────────────
   await page.click('.d-add-page-btn');
@@ -1015,7 +1075,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   await measureMenu('regional_metrics', 'Create measure');
   await page.type('.d-measure-name', 'Europe share');
-  await page.$$eval('.d-seg button', (bs) => bs[1].click());
+  await page.$$eval('.d-measure-dialog .d-seg button', (bs) => bs[1].click());
   const [opA, , opB] = await page.$$('.d-mcalc select');
   await opA.select('m:regional_metrics\u0000Revenue (Europe)');
   await opB.select('f:revenue');
@@ -1030,7 +1090,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.waitForSelector('.d-measure-dialog', { hidden: true });
 
   await page.click('.d-vis-icon[title="Add Card (KPI)"]');
-  await page.click('.d-subtab-btn:nth-child(1)');
+  await page.click('.d-visual-seg button:nth-child(1)');
   await drag('regional_metrics', 'Europe share', 0);
   check('a card shows a measure in its format', (await cards()).at(-1) === '26.9%', (await cards()).at(-1));
   await blank();
@@ -1068,20 +1128,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const sheet = () => page.$eval('.d-canvas-sheet', (e) => getComputedStyle(e).backgroundColor);
   const chrome0 = await chrome(), sheet0 = await sheet();
   const reportCards = await page.$$eval('.d-visualizations-pane .d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent));
-  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size' && !!(await page.$('.d-visualizations-pane .d-ftools .d-fbtn')), reportCards.join());
-  await fpick('Colors', 'Base', 'Dark');
+  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size' && !!(await page.$('.d-visualizations-pane .d-ftools .btn-secondary')), reportCards.join());
+  await fpick('Colors', 'Appearance', 'Dark');
   await sleep(100);
   check('a dark base restyles the report', (await sheet()) !== sheet0, `${sheet0} → ${await sheet()}`);
   check('…without touching the editor chrome', (await chrome()) === chrome0);
   check('…and the Colors card marks the change', !!(await page.$$eval('.d-fsec', (ss) => ss.find((s) => s.querySelector('.d-card-title').textContent.startsWith('Colors'))?.querySelector('.d-fchanged'))));
-  await page.click('.d-visualizations-pane .d-ftools .d-fbtn');
+  await page.click('.d-visualizations-pane .d-ftools .btn-secondary');
   await sleep(100);
   check('Reset brings the default look back', (await sheet()) === sheet0, await sheet());
   await fcontrol('Colors', 'Page', (row) => { const i = row.querySelector('input[type="color"]'); i.value = '#fbf6f0'; i.dispatchEvent(new Event('input', { bubbles: true })); });
   await fsec('Page size');
   // page size: a shape keeps the long side, the orientation turns the page
-  const canvasSize = () => page.$$eval('.d-visualizations-pane .d-row .d-input', (is) => is.map((i) => i.value).join('x'));
-  const [shapeSelect, turnSelect] = await page.$$('.d-visualizations-pane .d-row .d-well-select');
+  const canvasSize = () => page.$$eval('.d-visualizations-pane input[title$="(px)"]', (is) => is.map((i) => i.value).join('x'));
+  const [shapeSelect, turnSelect] = await page.$$('.d-visualizations-pane :is(select[title="Shape"], select[title="Orientation"])');
   check('the default page is 16:9, landscape', (await canvasSize()) === '1440x810' && (await shapeSelect.evaluate((s) => s.value)) === '16:9' && (await turnSelect.evaluate((s) => s.value)) === 'landscape', await canvasSize());
   await shapeSelect.select('4:3');
   await sleep(50);
@@ -1100,6 +1160,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   for (let i = 0; i < 40 && !saved; i++) { await sleep(150); saved = fs.readdirSync(dl).find((f) => f.endsWith('.dashier.html')); }
   check('Ctrl+S downloads a .dashier.html', !!saved, saved);
   if (saved) {
+    await settled(path.join(dl, saved));
     const html = fs.readFileSync(path.join(dl, saved), 'utf8');
     const json = html.match(/<script type="application\/dashier\+json" id="dashier-doc">([\s\S]*?)<\/script>/)[1];
     check('saved doc has no raw "<"', !json.includes('<'));
@@ -1127,7 +1188,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('saved file has no runtime DOM', html.includes('<div id="app"></div>') && !html.includes('class="d-visual-container'));
     const p2 = await browser.newPage();
     p2.on('pageerror', (e) => errors.push('reload: ' + e.message));
-    await p2.goto('file:///' + path.join(dl, saved).replace(/\\/g, '/'));
+    await openFile(p2, path.join(dl, saved));
     await p2.waitForSelector('.card-value');
     check('saved file reopens in the editor', !!(await p2.$('.mode-edit')));
     check('saved file keeps the filter', (await p2.$eval('.card-value', (e) => e.textContent)) === '$489,101');
@@ -1278,13 +1339,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       for (let i = 0; i < 80; i++) {
         await sleep(150);
         const f = fs.readdirSync(dir).find((n) => n.endsWith(ext));
-        if (f) return path.join(dir, f);
+        if (f) return settled(path.join(dir, f));
       }
     };
     const docOf = (file) => JSON.parse(fs.readFileSync(file, 'utf8').match(/id="dashier-doc">([\s\S]*?)<\/script>/)[1]);
     const cards = (p) => p.$$eval('.card-value', (es) => es.map((e) => e.textContent).join(' | '));
     const share = async (p, item) => {
-      await p.click('.ed-btn-primary');
+      await p.click('.ed-topbar .btn-primary');
       await p.waitForSelector('.d-context-menu');
       await p.$$eval('.d-context-menu button', (b, re) => b.find((x) => new RegExp(re).test(x.textContent)).click(), item);
     };
@@ -1326,7 +1387,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const p3 = await browser.newPage();
       p3.on('pageerror', (e) => errors.push('encrypted: ' + e.message));
       await p3.evaluateOnNewDocument(() => { delete window.showSaveFilePicker; });
-      await p3.goto('file:///' + sealed.replace(/\\/g, '/'));
+      await openFile(p3, sealed);
       await p3.waitForSelector('.d-password');
       check('an encrypted file asks for its password before rendering anything', !(await p3.$('.d-visual-container')) && !(await p3.$eval('.d-password', (e) => e.textContent)).includes('If you lose'));
       await submit(p3, 'wrong');
@@ -1341,14 +1402,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       // Export JSON is the hand-over format: plain data even from an encrypted report, valid, and opened with no prompt
       dir = await saveDir(p3);
       await share(p3, 'Export as JSON');
-      await p3.waitForSelector('.d-about');
-      check('Export JSON from an encrypted report first warns that the data comes out readable', (await p3.$eval('.d-about', (e) => e.textContent)).includes('anyone with the JSON can read the data'));
-      await p3.click('.d-about .btn-secondary');
+      await p3.waitForSelector('.d-export-warn');
+      check('Export JSON from an encrypted report first warns that the data comes out readable', (await p3.$eval('.d-export-warn', (e) => e.textContent)).includes('Anyone with the file can read it'));
+      await p3.click('.d-export-warn .btn-secondary');
       await sleep(300);
-      check('…and Cancel exports nothing', !(await p3.$('.d-about')) && !fs.readdirSync(dir).length);
+      check('…and Cancel exports nothing', !(await p3.$('.d-export-warn')) && !fs.readdirSync(dir).length);
       await share(p3, 'Export as JSON');
-      await p3.waitForSelector('.d-about');
-      await p3.click('.d-about .btn-primary');
+      await p3.waitForSelector('.d-export-warn');
+      await p3.click('.d-export-warn .btn-primary');
       const json = await download(dir, '.dashier.json');
       const exported = json && JSON.parse(fs.readFileSync(json, 'utf8'));
       check('Export JSON uses one-space indents too', !!json && fs.readFileSync(json, 'utf8').startsWith('{\n "format"'));
@@ -1448,7 +1509,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await p7.goto(URL);
       await p7.waitForSelector('.card-value');
       const before = await cards(p7);
-      await p7.click('.d-get-data-btn');
+      await p7.click('.d-data-pane-footer .btn-secondary');
       await p7.click('.d-paste-btn');
       await p7.type('.modal-dialog textarea', '[{"k":"a","n":1},{"k":"b, c","n":2.5}]');
       await p7.waitForSelector('.d-getdata .d-grid');
@@ -1464,7 +1525,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const lines = (id) => zlib.gunzipSync(Buffer.from(d.sources[id].payload, 'base64')).toString().split('\n');
       check('a pasted JSON table is saved as columns, value for value', !!d &&
         lines('pasted').join('|') === 'k,a,"b, c"|n,1,2.5', d && lines('pasted').join('|'));
-      await p7.goto('file:///' + saved.replace(/\\/g, '/'));
+      await openFile(p7, saved);
       await p7.waitForSelector('.card-value');
       await sleep(300);
       check('…which reopen with the same data', (await cards(p7)) === before, await cards(p7));

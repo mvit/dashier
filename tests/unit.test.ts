@@ -1145,3 +1145,16 @@ test('dictionary columns: filters, joins and pivots work per word and match a ro
   assert.deepEqual(p.cats, ['2024-01', '(Blank)']);
   assert.deepEqual([...pivot(joined, 'c', 'v').groups.get('')!], [...pivot(joined, 'c', 'v').totals], 'without a group, the cells are the totals');
 });
+
+
+test('mobile column charts retain all marks at readable widths', () => {
+  const rows = Array.from({ length: 36 }, (_, i) => ({ month: String(Math.floor(i / 3) + 1), series: String(i % 3), v: i + 1 }));
+  const el = chart({ mapping: { x: 'month', y: 'v', group: 'series' } });
+  const spec = buildChart(el, rowsFrame(rows));
+  const svg = drawn(spec, spec.minWidth, 200);
+  const widths = [...svg.matchAll(/<rect x="[\d.-]+" y="[\d.-]+" width="([\d.-]+)" height=/g)].map(m => Number(m[1]));
+  assert.equal(widths.length, 36);
+  assert.ok(Math.min(...widths) >= 8);
+  assert.ok(buildChart({ ...el, options: { stack: 'stacked' } }, rowsFrame(rows)).minWidth! < spec.minWidth!);
+  assert.equal(buildChart({ ...el, chartType: 'line' }, rowsFrame(rows)).minWidth, undefined);
+});

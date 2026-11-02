@@ -31,7 +31,7 @@ export const PrintView: Component = () => {
               <div class="d-visuals-grid">
                 <For each={page.elements}>
                   {(elem) => (
-                    <div class="d-visual-container" style={cell(elem)}>
+                    <div class="d-visual-container" data-type={elem.type} style={cell(elem)}>
                       <div class="d-visual-inner">
                         <Widget element={elem} />
                       </div>
