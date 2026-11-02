@@ -69,7 +69,8 @@ export const Seg = <T,>(p: { value: T; options: readonly (readonly [T, JSX.Eleme
 /** A checkbox (or radio) and its label. */
 export const Check = (p: { checked: boolean; set: () => void; radio?: boolean; children: JSX.Element }) => (
   <label class="d-checkbox-label">
-    <input type={p.radio ? 'radio' : 'checkbox'} checked={p.checked} onClick={p.set} />
+    {/* a click the state doesn't follow (the option already on) mustn't leave the box showing otherwise */}
+    <input type={p.radio ? 'radio' : 'checkbox'} checked={p.checked} onClick={(e) => (p.set(), (e.currentTarget.checked = p.checked))} />
     {p.children}
   </label>
 );

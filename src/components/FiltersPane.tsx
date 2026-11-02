@@ -11,7 +11,7 @@ import { Card, Check, RangeInputs, Search, Seg, Select } from './ui';
 const DATE_MODES = [['range', 'Range', 'From one date to another'], ['last', 'Last', 'The last n days, weeks, months or years'], ['year', 'Year', 'Pick years'], ['quarter', 'Qtr', 'Pick quarters'], ['month', 'Month', 'Pick months']];
 
 /**
- * One filter, collapsible: its header says what it keeps ("is Software", "2025 Q4", "Last 3 months", "All"); the body
+ * One filter, collapsible: its header says what it keeps ("is Software", "2025 Q4", "Last 3 months"); the body
  * picks values from a checklist (text, and dates grouped by year, quarter or month), a from–to range (numbers, dates)
  * or the last n days/weeks/months/years. Nothing set = all.
  */
@@ -58,7 +58,7 @@ const FilterCard: Component<{ scope: FilterScope; index: number; filter: DashFil
       </Show>
       <div class="d-filter-values">
         <Check checked={!selected().length} set={() => update({ values: [] })}>
-          <i>All</i>
+          Select All
         </Check>
         <For each={shown()}>
           {(v) => (
@@ -88,7 +88,7 @@ const FilterCard: Component<{ scope: FilterScope; index: number; filter: DashFil
             {f().field}
             <small>{f().table}</small>
           </span>
-          <span class="filter-type">{summary() || 'All'}</span>
+          <span class="filter-type">{summary()}</span>
         </>
       }
       actions={
@@ -143,8 +143,8 @@ const FilterSection: Component<{ scope: FilterScope; title: string }> = (props) 
         </Show>
       </div>
       <Index each={filters()}>{(f, i) => <FilterCard scope={props.scope} index={i} filter={f()} />}</Index>
-      <div class={`d-well-box d-droppable d-filter-drop ${over() ? 'over' : ''}`} {...dropProps(add, setOver)}>
-        <div class="d-well-empty">+ Drag a field here</div>
+      <div class={`d-well-box d-droppable ${over() ? 'over' : ''}`} {...dropProps(add, setOver)}>
+        <div class="d-well-empty">Add data fields here</div>
       </div>
     </div>
   );

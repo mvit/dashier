@@ -372,7 +372,7 @@ export const Canvas: Component = () => {
                   title={
                     <>
                       <span class="filter-name">{elem.title || elem.field}</span>
-                      <span class="filter-type">{pickSummary(elem.selection, (v) => datePartLabel(v, elem.datePart), () => store.slicerOptions(elem).values.length) || 'All'}</span>
+                      <span class="filter-type">{pickSummary(elem.selection, (v) => datePartLabel(v, elem.datePart), () => store.slicerOptions(elem).values.length)}</span>
                     </>
                   }
                   actions={

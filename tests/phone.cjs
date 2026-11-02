@@ -86,6 +86,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check(`${at}: a lone slicer starts open and still collapses`, !(await page.$('.d-drawer .d-slicer')));
     await head.tap();
     await page.waitForSelector('.d-drawer .d-slicer');
+    check(`${at}: a drawer card's header never just says All`, (await page.$eval('.d-drawer .filter-type', (e) => e.textContent)) !== 'All');
     await (await page.$('.d-drawer .d-slicer-tile')).tap();
     await sleep(100);
     const picked = await page.$eval('.d-drawer .filter-type', (e) => e.textContent);
@@ -257,6 +258,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await touch('touchEnd', []);
     await sleep(200);
     check('tablet: a field dropped outside any well does nothing', !(await ghost()) && (await legend()).includes('subcategory'));
+
+    // the filter it makes: Select All is the first option, and stays true to the filter
+    const pad = await (await page.$('.d-filters-pane .d-filter-section:nth-child(2) .d-well-box')).boundingBox();
+    await touch('touchStart', [{ ...from, id: 1 }]);
+    await sleep(400);
+    await touch('touchMove', [{ x: pad.x + pad.width / 2, y: pad.y + pad.height / 2, id: 1 }]);
+    await touch('touchEnd', []);
+    await page.waitForSelector('.d-filter-card .d-filter-values');
+    const options = () => page.$$eval('.d-filter-card .d-filter-values label', (ls) => ls.map((l) => ({ text: l.textContent.trim(), on: l.querySelector('input').checked })));
+    const headed = () => page.$eval('.d-filter-card .filter-type', (e) => e.textContent);
+    const option = (n) => page.$$eval('.d-filter-card .d-filter-values input', (els, i) => els[i].click(), n);
+    check('tablet: a filter lists Select All first, on, with no All in its header', (await options())[0].text === 'Select All' && (await options())[0].on && !(await headed()), `"${await headed()}"`);
+    await option(0);
+    await sleep(100);
+    check('tablet: …a click on it while it\'s on leaves it on', (await options())[0].on);
+    await option(1);
+    await sleep(100);
+    check('tablet: …picking a value turns it off', !(await options())[0].on && !!(await headed()), await headed());
+    await option(0);
+    await sleep(100);
+    check('tablet: …and it lets the pick go', (await options())[0].on && !(await options())[1].on && !(await headed()));
     await page.close();
   }
   await browser.close();
