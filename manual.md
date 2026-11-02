@@ -8,6 +8,10 @@ How to use the editor, build reports with an LLM agent, and what's inside the fi
 The file opens in the editor. **▶ Preview** hides the chrome and shows the report as a recipient sees it (Esc to
 return).
 
+Clicking a bar, a pie slice or a treemap block filters the rest of the page by its value, and the other marks dim; in the
+editor it also selects the visual. Click it again, click anywhere else or press Esc to let go, and any edit lets go too. The
+pick isn't saved, and like any filter it only reaches tables connected to the clicked one.
+
 The report page has a fixed size (default 1440×810, set under **Page size** when nothing is selected; stored as
 `canvas`). It is never reflowed to fit the window (except on a phone, below): zoom it with a trackpad pinch or the
 status bar at the bottom of the window (the slider, or the percentage's menu: **Fit width**, **Fit page** and set sizes). The browser's own zoom (Ctrl/⌘

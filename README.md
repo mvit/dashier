@@ -2,7 +2,7 @@
 
 A whole dashboard in one HTML file, with the data inside. Email it. Open it in any browser. Filter it, slice it, edit it. No server, no account, no license, no network request.
 
-The editor is 140 KB. **[Try it](https://mvit.github.io/dashier/).**
+The editor is 141 KB. **[Try it](https://mvit.github.io/dashier/).**
 
 ## Why
 

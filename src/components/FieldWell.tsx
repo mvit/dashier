@@ -109,12 +109,12 @@ const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () =>
   let menu!: HTMLDivElement;
   const r = props.anchor.getBoundingClientRect();
   const area = menuArea();
-  const [pos, setPos] = createSignal({ left: r.left, top: r.bottom + 2, width: Math.max(r.width, 210) });
+  const [pos, setPos] = createSignal({ left: r.left, top: r.bottom + 4, width: Math.max(r.width, 210) });
 
   onMount(() => {
     // flip above the pill / pull left when it would run off the window
     const m = menu.getBoundingClientRect();
-    const top = r.bottom + 2 + m.height > area.bottom ? Math.max(area.top, r.top - m.height - 2) : r.bottom + 2;
+    const top = r.bottom + 4 + m.height > area.bottom ? Math.max(area.top, r.top - m.height - 4) : r.bottom + 4;
     const left = Math.min(r.left, innerWidth - m.width - 8);
     setPos(p => ({ ...p, top, left }));
 

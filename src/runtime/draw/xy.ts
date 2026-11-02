@@ -225,7 +225,7 @@ export function xyChart(d: XYData) {
           const bw = horizontal ? (to - from) * plotWidth : thickness - gap;
           const bh = horizontal ? thickness - gap : (to - from) * plotHeight;
           const r = d.barRadius && Math.min(d.barRadius, bw / 2, bh / 2);
-          rects += `<rect ${pos(bx, by)} width="${num(bw)}" height="${num(bh)}"${r ? ` rx="${num(r)}"` : ''}${d.vary ? ` fill="${seriesColor(i)}"` : ''}/>`;
+          rects += `<rect ${pos(bx, by)} width="${num(bw)}" height="${num(bh)}"${r ? ` rx="${num(r)}"` : ''}${d.vary ? ` fill="${seriesColor(i)}"` : ''} data-i="${i}"/>`;
           const label = labelled[index][i];
           if (!label) continue;
           const lw = m.width(label, TINY);

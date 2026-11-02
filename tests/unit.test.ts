@@ -119,7 +119,7 @@ const chart = (over: Partial<ChartElement>): ChartElement => ({ id: 'c', type: '
 // what a drawn chart shows: its bars' heights relative to the tallest, and the text of its labels
 const drawn = (spec: { draw?: (a: { w: number; h: number }) => string }, w = 600, h = 400) => spec.draw!({ w, h });
 const barHeights = (svg: string) => {
-  const hs = [...svg.matchAll(/<rect x="[\d.-]+" y="[\d.-]+" width="[\d.-]+" height="([\d.-]+)"\/>/g)].map(m => +m[1]);
+  const hs = [...svg.matchAll(/<rect x="[\d.-]+" y="[\d.-]+" width="[\d.-]+" height="([\d.-]+)"[^>]*\/>/g)].map(m => +m[1]);
   return hs.map(h => +(h / Math.max(...hs)).toFixed(2));
 };
 const texts = (svg: string, anchor: string) =>
@@ -527,7 +527,7 @@ test('drawing: treemap, sankey and radar pieces carry the data their tooltips sh
 test('stacked bars stand on each other; 100% stacked fill each category', () => {
   const stacked = drawn(buildChart(chart({ mapping: { x: 'region', y: 'v', group: 'q' }, options: { stack: 'stacked' } }), rowsFrame(sales)));
   // East: 10 (Q1) and 30 (Q2) in one bar of 40, as tall as North's 40
-  const rects = [...stacked.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="[\d.]+" height="([\d.]+)"\/>/g)].map(m => m.slice(1).map(Number));
+  const rects = [...stacked.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="[\d.]+" height="([\d.]+)"[^>]*\/>/g)].map(m => m.slice(1).map(Number));
   const east = rects.filter(r => r[0] === rects[0][0]);
   assert.equal(east.length, 2);
   assert.ok(Math.abs(east[0][1] - (east[1][1] + east[1][2])) < 0.02, 'Q1 starts where Q2 ends');
@@ -1157,4 +1157,21 @@ test('mobile column charts retain all marks at readable widths', () => {
   assert.ok(Math.min(...widths) >= 8);
   assert.ok(buildChart({ ...el, options: { stack: 'stacked' } }, rowsFrame(rows)).minWidth! < spec.minWidth!);
   assert.equal(buildChart({ ...el, chartType: 'line' }, rowsFrame(rows)).minWidth, undefined);
+});
+
+test('click to filter: bars, slices and blocks pick their value; blanks, "Other" and lines pick nothing', () => {
+  const rows = [{ c: 'a', g: 'x', v: 1 }, { c: 'b', g: 'y', v: 2 }, { c: '', g: 'y', v: 3 }];
+  const el = (s: string, i: string) => ({ getAttribute: (a: string) => (a === 'data-i' ? i : null), closest: (q: string) => (q === '.c-bars' ? { getAttribute: () => s } : null) }) as unknown as Element;
+  const bars = buildChart(chart({ mapping: { x: 'c', y: 'v', group: 'g' } }), rowsFrame(rows));
+  assert.deepEqual(bars.pick!(el('0', '0')), { mark: '.c-bars[data-s="0"] rect[data-i="0"]', x: 'a', group: 'x' });
+  assert.equal(bars.pick!(el('1', '2')), null, 'a blank is no value');
+  assert.equal(buildChart(chart({ chartType: 'line', mapping: { x: 'c', y: 'v' } }), rowsFrame(rows)).pick!({ getAttribute: () => null, closest: () => null } as unknown as Element), null, 'a line is no bar');
+  const piece = (i: number) => ({ closest: () => ({ getAttribute: () => String(i) }) }) as unknown as Element;
+  const many = Array.from({ length: 4 }, (_, i) => ({ c: `k${i}`, v: 10 - i }));
+  const pie = buildChart(chart({ chartType: 'pie', mapping: { x: 'c', y: 'v' }, options: { topN: 2 } }), rowsFrame(many));
+  assert.equal(pie.pick!(piece(0))!.x, 'k0');
+  assert.equal(pie.pick!(piece(2)), null, 'the rest, as "Other", is no value');
+  const tree = buildChart(chart({ chartType: 'treemap', mapping: { x: 'c', y: 'v', group: 'g' } }), rowsFrame(rows.slice(0, 2)));
+  const leaf = [0, 1, 2, 3].map(i => tree.pick!(piece(i))).find(p => p?.x === 'a');
+  assert.deepEqual([leaf?.x, leaf?.group], ['a', 'x']);
 });

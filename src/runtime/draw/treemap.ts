@@ -8,6 +8,8 @@ const LINE = 1.25;
 
 /** A leaf with a value, or a section of leaves. */
 export interface TreeNode {
+  /** What a click on it picks: its value and its parent's, as the data has them. */
+  key?: [string, string?];
   name: string;
   value?: number;
   children?: TreeNode[];
@@ -112,7 +114,7 @@ function layout(all: Box[], width: number, height: number): Box[] {
 export function treemapChart(roots: TreeNode[], format: (v: number) => string) {
   // totals are worked out once; each drawing only places the boxes
   const all = tree(roots);
-  const nodes = all.map(b => ({ name: b.node.name, value: b.value }));
+  const nodes = all.map(b => ({ name: b.node.name, value: b.value, key: b.node.key }));
 
   const draw = (area: Area): string => {
     const m = measurer(area.font);

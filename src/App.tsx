@@ -58,6 +58,7 @@ export const App: Component = () => {
       return store.save(false);
     }
     if (esc && dialog()) return close();
+    if (esc && store.picked()) return store.clearPick();
     if (esc && store.preview()) return store.setPreview(false);
     // an open dialog or menu has the keyboard: nothing behind it moves, deletes or undoes
     if (dialog() || document.querySelector('.d-context-menu,.d-field-menu')) return;

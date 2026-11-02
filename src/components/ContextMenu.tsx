@@ -43,7 +43,7 @@ export const openMenuBelow = (e: MouseEvent, items: MenuEntry[]) => {
   if (menu()?.anchor === anchor) {
     e.stopPropagation();
     setMenu(null);
-  } else openMenu(e, items, { x: r.left, y: r.bottom + 2, above: r.top - 2, right: r.right, anchor });
+  } else openMenu(e, items, { x: r.left, y: r.bottom + 4, above: r.top - 4, right: r.right, anchor });
 };
 
 /**
@@ -74,7 +74,7 @@ export const ContextMenuHost: Component = () => {
       if (!m || m.placed) return;
       const { width, height } = node.getBoundingClientRect();
       const area = menuArea();
-      setMenu({ ...m, x: Math.max(4, m.x + width > innerWidth - 4 ? (m.right ?? innerWidth - 4) - width : m.x), y: Math.max(area.top, m.y + height > area.bottom ? (m.above ?? area.bottom) - height : m.y), placed: true });
+      setMenu({ ...m, x: Math.max(4, m.x + width > innerWidth - 4 ? (m.right ?? innerWidth - 4) - width : m.x), y: m.y + height > area.bottom ? Math.max(area.top, (m.above ?? area.bottom) - height) : m.anchor ? m.y : Math.max(area.top, m.y), placed: true });
     });
   };
 

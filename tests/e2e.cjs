@@ -158,6 +158,45 @@ const openFile = async (p, file) => {
   await page.waitForSelector('.mode-edit');
   check('Done returns to the editor', !!(await page.$('.d-visualizations-pane')));
 
+  // click to filter: in preview a bar filters the rest of the page, and only a mark does
+  await open('#preview');
+  const kpis = () => page.$$eval('.card-value', (es) => es.map((e) => e.textContent).join(' | '));
+  const dimmed = () => page.$$eval('.d-chart-svg svg.c-picked', (s) => s.length);
+  const whole = await kpis();
+  await page.waitForSelector('.c-bars rect');
+  await page.click('.c-bars rect');
+  await sleep(200);
+  check('clicking a bar filters the rest of the page and dims the other bars', (await kpis()) !== whole && (await dimmed()) === 1 && (await page.$$('.c-bars rect.c-on')).length === 1, await kpis());
+  await page.click('.c-bars rect.c-on');
+  await sleep(200);
+  check('clicking it again lets go', (await kpis()) === whole && (await dimmed()) === 0, await kpis());
+  await page.click('.c-bars rect');
+  await sleep(200);
+  await page.keyboard.press('Escape');
+  await sleep(200);
+  check('Esc lets go of the pick first, and stays in preview', (await kpis()) === whole && !!(await page.$('.mode-preview')));
+  await open();
+  await page.waitForSelector('.c-bars rect');
+  await page.click('.c-bars rect');
+  await sleep(200);
+  check('in the editor a click on a bar filters the page too, and selects its visual', (await kpis()) !== whole && !!(await page.$('svg.c-picked')) && !!(await page.$('.d-selected')));
+  await page.keyboard.press('Escape');
+  await sleep(200);
+  check('…and Esc lets go', (await kpis()) === whole && !(await page.$('svg.c-picked')));
+  const bar = await (await page.$('.c-bars rect')).boundingBox();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 2 + 8, bar.y + bar.height / 2);
+  await page.mouse.up();
+  await sleep(200);
+  check('a press that moved is a drag, not a click on the bar', !(await page.$('svg.c-picked')));
+  await page.click('.c-bars rect');
+  await sleep(200);
+  await page.keyboard.down('Control'); await page.keyboard.press('d'); await page.keyboard.up('Control');
+  await sleep(200);
+  check('an edit lets go of the pick', !(await page.$('svg.c-picked')) && (await kpis()) === whole);
+  await open();
+
   // ── bottom bars: page tabs scroll, the + stays put; zoom lives in the window-wide status bar ──
   check('zoom controls are in the status bar, not the page tabs', !!(await page.$('.ed-statusbar .d-zoom')) && !(await page.$('.d-bottom-pages-bar .d-zoom')));
   for (let i = 0; i < 14; i++) await page.click('.d-add-page-btn');

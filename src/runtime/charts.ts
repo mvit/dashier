@@ -372,6 +372,17 @@ export function chartReady(el: ChartElement): boolean {
   return kind === 'gauge' ? !!m.y : kind === 'sankey' ? !!(m.x && m.y && m.group) : kind === 'combo' ? !!(m.x && (m.y || m.line)) : !!(m.x && m.y);
 }
 
+/** A mark clicked in a chart: the selector that finds it again, and the x and group values it stands for. */
+export interface ChartPick {
+  mark: string;
+  x: string;
+  group?: string;
+}
+
+/** A mark's pick, unless it isn't one value of the data (a blank, or the rest as "Other"). */
+const pickOf = (mark: string, x?: string, group?: string): ChartPick | null =>
+  x == null || [x, group].some(v => v === '(Blank)' || v === 'Other') ? null : { mark, x, group };
+
 /** What a tooltip shows: a heading and one line per value (the hovered series marked active). */
 export interface Tip {
   title: string;
@@ -389,6 +400,8 @@ export interface ChartSpec {
   legend: { name: string; index: number; line?: boolean }[];
   /** The tooltip for the pointer at `pt` (SVG coordinates) over `target`. */
   tip?: (target: Element, svg: SVGSVGElement, pt: { x: number; y: number }) => Tip | null;
+  /** The value a click on `target` picks: only a bar, a slice or a treemap block has one. */
+  pick?: (target: Element) => ChartPick | null;
 }
 
 /** What the chart needs to know beyond its element: which fields are dates, and the measures it can use. */
@@ -484,6 +497,7 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
   const valueName = yv?.label ?? '';
   const series = (bars ? groupsOf(bars.groups, ctx.groupDate, group && !groupPart ? ctx.order?.(group) : undefined) : []).map(([name, m]) => ({
     name: group ? datePartLabel(name, groupPart) : valueName,
+    key: name,
     data: run(cats.map(c => m.get(c) ?? 0), ys.showAs),
     line: kind === 'line' || kind === 'area',
     area: kind === 'area'
@@ -539,6 +553,10 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
       const active = target.tagName === 'rect' ? Number(target.closest('[data-s]')?.getAttribute('data-s') ?? -1) : -1;
       const value = (k: number) => (shares ? `${formatFull(shares[k][i], 'share')} (${formatFull(series[k].data[i], valueFmt)})` : formatFull(series[k].data[i], (series[k] as any).f ?? fmt));
       return { title: shown[i], rows: series.map((s, k) => ({ label: s.name, value: value(k), color: seriesColor(k), active: k === active })) };
+    },
+    pick: (target) => {
+      const k = target.closest('.c-bars')?.getAttribute('data-s'), i = target.getAttribute('data-i');
+      return k == null || i == null ? null : pickOf(`.c-bars[data-s="${k}"] rect[data-i="${i}"]`, cats[+i], group ? (series[+k] as any).key : undefined);
     }
   };
 }
@@ -583,6 +601,10 @@ export function buildChart(el: ChartElement, frame: Frame, ctx: ChartContext = {
       tip: (target) => {
         const hit = slices[pieceOf(target, '.c-slice')];
         return hit ? { title: hit[0], rows: [...tipOf('', hit[1]).rows, { label: 'Share', value: `${((hit[1] / total) * 100).toFixed(1)}%` }] } : null;
+      },
+      pick: (target) => {
+        const i = pieceOf(target, '.c-slice');
+        return i < 0 ? null : pickOf(`.c-slice[data-i="${i}"]`, ordered.find(c => xLabel(c) === slices[i][0]));
       }
     };
   }
@@ -609,7 +631,7 @@ export function buildChart(el: ChartElement, frame: Frame, ctx: ChartContext = {
     const roots: TreeNode[] = [];
     const drawn: string[] = []; // parents in drawing order: they're colored by position
     for (const [parent, m] of groupsOf(groups, ctx.groupDate, gOrder)) {
-      const leaves = topN([...m].filter(([, v]) => v > 0), MAX_SLICES * 2).map(([n, v]) => ({ name: xLabel(n), value: v }));
+      const leaves = topN([...m].filter(([, v]) => v > 0), MAX_SLICES * 2).map(([n, v]) => ({ name: xLabel(n), value: v, key: [n, group ? parent : undefined] as [string, string?] }));
       if (!leaves.length) continue;
       drawn.push(gLabel(parent));
       if (group) roots.push({ name: gLabel(parent), children: leaves });
@@ -624,6 +646,10 @@ export function buildChart(el: ChartElement, frame: Frame, ctx: ChartContext = {
       tip: (target) => {
         const node = chart.nodes[pieceOf(target, '.c-node')];
         return node ? tipOf(node.name, node.value) : null;
+      },
+      pick: (target) => {
+        const i = pieceOf(target, '.c-leaf'), key = chart.nodes[i]?.key;
+        return key ? pickOf(`.c-leaf[data-i="${i}"]`, ...key) : null;
       }
     };
   }

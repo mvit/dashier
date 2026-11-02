@@ -239,7 +239,7 @@ export const Canvas: Component = () => {
   };
 
   return (
-    <div class="d-canvas-workspace" onClick={() => panned ? (panned = false) : store.setSelectedElementId(null)}>
+    <div class="d-canvas-workspace" onClick={() => panned ? (panned = false) : (store.setSelectedElementId(null), store.clearPick())}>
       <div
         class={`d-canvas-scroll-container ${spaceHeld() ? 'pan-ready' : ''} ${panning() ? 'panning' : ''}`}
         ref={scrollRef}
@@ -279,7 +279,10 @@ export const Canvas: Component = () => {
                       onPointerDown={(e) => startDrag(e, elem, 'move')}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (store.editing() && !(e.target as HTMLElement).closest('button,input,select,textarea,a,label')) store.setSelectedElementId(elem.id);
+                        if ((e.target as HTMLElement).closest('button,input,select,textarea,a,label')) return;
+                        // a chart's own clicks pick or let go (ChartHost); a click on anything else lets go
+                        if (!(e.target as HTMLElement).closest('.d-chart-plot')) store.clearPick();
+                        if (store.editing()) store.setSelectedElementId(elem.id);
                       }}
                       onContextMenu={(e) => {
                         if (!store.editing()) return;

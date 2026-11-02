@@ -1,4 +1,4 @@
-import { createSignal, createRoot, createMemo } from 'solid-js';
+import { createSignal, createRoot, createEffect, createMemo } from 'solid-js';
 import { createStore, reconcile, unwrap } from 'solid-js/store';
 import {
   DashDocument,
@@ -17,13 +17,14 @@ import {
   ShowAs,
   Compare,
   FieldType,
+  ChartElement,
   WidgetType,
   isNumericType,
   resolveTheme,
   resolveCanvas
 } from '../types/model';
 import { renameInTemplate, templateVariables } from './template';
-import { aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
+import { ChartPick, aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
 import { hydrateSource, readColumns } from './hydrate';
 import { blobOf, hold, holdBase64, holdText, isHeld, payloadText, release } from './payloads';
 import { Lock, deriveLock, seal, unseal } from './crypt';
@@ -112,6 +113,7 @@ function createDashboardStore() {
   /** Records an undo point. Calls sharing `key` within 1s coalesce (typing, dragging). */
   function pushHistory(key = '') {
     const now = Date.now();
+    setPicked(null);
     // a drag's key is its own: the whole gesture is one step however long it pauses
     if (!key || key !== lastKey || (now - lastTime > 1000 && !key.startsWith('drag:'))) {
       undoStack.push(snapshot());
@@ -127,6 +129,7 @@ function createDashboardStore() {
   function restore(from: Snap[], to: Snap[]) {
     const snap = from.pop();
     if (!snap) return;
+    setPicked(null);
     to.push(snapshot());
     const next = JSON.parse(snap.rest);
     const sourcesChanged = snap.src !== srcSnap();
@@ -328,6 +331,19 @@ function createDashboardStore() {
   const pageByElement = createMemo(() => new Map(doc.pages.flatMap(p => p.elements.map(e => [e.id, p] as const))));
   const pageFor = (elem: DashElement) => pageByElement().get(elem.id) || getActivePage();
 
+  // A mark clicked in a chart filters the rest of its page, like a slicer. It's the viewer's, never saved: a click on it
+  // or anywhere else, Esc, another page or any edit (the mark may be gone) lets it go.
+  const [picked, setPicked] = createSignal<{ from: string; mark: string; filters: DashFilter[] } | null>(null);
+  createEffect(() => (activePageId(), setPicked(null)));
+  function pickMark(el: ChartElement, pick?: ChartPick | null) {
+    const on = (ref: string, value: string, datePart?: DatePart): DashFilter => {
+      const [table, field] = ref.includes('.') ? ref.split('.') : [el.sourceId, ref];
+      return { table, field, datePart, values: [value] };
+    };
+    const same = picked()?.from === el.id && picked()?.mark === pick?.mark;
+    setPicked(!pick || same ? null : { from: el.id, mark: pick.mark, filters: [on(el.mapping.x!, pick.x, el.dateParts?.x), ...(pick.group == null ? [] : [on(el.mapping.group!, pick.group, el.dateParts?.group)])] });
+  }
+
   /** Filtered whole tables, shared by visuals that see the same filters; a new map when the data or those filters change. */
   const frameCache = createMemo(() => (dataStore(), doc.filters, doc.relationships, doc.pages.forEach(p => (p.filters, p.elements.forEach(e => (e.filters, (e as SlicerElement).selection)))), new Map<string, Frame>()));
 
@@ -345,8 +361,9 @@ function createDashboardStore() {
    * comparison's stand-in for the visual carries its whole list instead (`whole`).
    */
   function filtersOf(elem: DashElement, skip?: string): DashFilter[] {
-    const page = pageFor(elem);
-    return (elem as any).whole ? elem.filters || [] : [...(doc.filters || []), ...(page?.filters || []), ...slicerFilters(page, skip), ...(elem.filters || [])];
+    const page = pageFor(elem), pick = picked();
+    const clicked = pick && pick.from !== elem.id && page?.elements.some(e => e.id === pick.from) ? pick.filters : [];
+    return (elem as any).whole ? elem.filters || [] : [...(doc.filters || []), ...(page?.filters || []), ...slicerFilters(page, skip), ...(elem.filters || []), ...clicked];
   }
 
   /** What an element reads: its table's rows after filters (shared with the same filters), then the joins it needs. */
@@ -1396,6 +1413,9 @@ function createDashboardStore() {
     editing,
     phone: isPhone,
     bare,
+    picked,
+    pickMark,
+    clearPick: () => setPicked(null),
     preview,
     setPreview,
     printing,
