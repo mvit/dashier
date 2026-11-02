@@ -13,7 +13,7 @@ editor it also selects the visual. Click it again, click anywhere else or press 
 pick isn't saved, and like any filter it only reaches tables connected to the clicked one.
 
 The report page has a fixed size (default 1440×810, set under **Page size** when nothing is selected; stored as
-`canvas`). It is never reflowed to fit the window (except on a phone, below): zoom it with a trackpad pinch or the
+`canvas`). It is never reflowed to fit the window (except on a phone, below): zoom it with a pinch or the
 status bar at the bottom of the window (the slider, or the percentage's menu: **Fit width**, **Fit page** and set sizes). The browser's own zoom (Ctrl/⌘
 +/−/0, Ctrl + wheel) resizes the editor UI as usual. Pan with the scrollbars, by dragging the background, or with
 Space + drag or the middle button. The page grows taller if visuals run past the bottom. A `#preview` URL hash opens

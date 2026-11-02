@@ -134,6 +134,85 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check(`${at}: no page errors`, !errors.length, errors.join(' | '));
     await page.close();
   }
+
+  // on a tablet the editor stays: two fingers on the view pinch it, wherever they land, and never drag a visual
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1180, height: 820, isMobile: true, hasTouch: true });
+    const cdp = await page.createCDPSession();
+    const touch = async (type, points) => {
+      await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+      await sleep(50);
+    };
+    const state = (name) => page.$eval(`[title^="${name}"]`, (b) => !b.disabled);
+    const zoom = () => page.$eval('.d-canvas-sheet', (e) => +e.style.transform.match(/[\d.]+/)[0]);
+    const placed = () => page.$$eval('.d-visual-container', (els) => els.map((e) => e.style.cssText).join());
+    const sheet = () => page.$eval('.d-canvas-sheet', (e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+    const open = async () => {
+      await page.goto(pathToFileURL(FILE).href);
+      await page.waitForSelector('.d-visual-container[data-type="chart"]');
+      await sleep(500);
+      // both fingers on the first card: at this width the panes cover the ones beside it
+      const box = await (await page.$('.d-visual-container[data-type="card"]')).boundingBox();
+      const at = (f) => ({ x: box.x + box.width * f, y: box.y + box.height / 2 });
+      return { a: at(0.25), b: at(0.75), start: await placed(), scale: await zoom() };
+    };
+
+    let { a, b, start, scale } = await open();
+    check('tablet: the editor is open', !!(await page.$('.ed-topbar')));
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const before = await sheet();
+    await touch('touchStart', [{ ...a, id: 1 }]);
+    await touch('touchStart', [{ ...a, id: 1 }, { ...b, id: 2 }]);
+    await touch('touchMove', [{ x: a.x - 30, y: a.y, id: 1 }, { x: b.x + 30, y: b.y, id: 2 }]);
+    await touch('touchMove', [{ x: a.x - 60, y: a.y, id: 1 }, { x: b.x + 60, y: b.y, id: 2 }]);
+    const wider = await zoom();
+    const expected = scale * ((b.x - a.x + 120) / (b.x - a.x));
+    check('tablet: a pinch on visuals zooms by how far the fingers spread', Math.abs(wider - expected) < 0.02, `${scale} -> ${wider}, expected ${expected.toFixed(3)}`);
+    const after = await sheet();
+    const drift = Math.hypot((mid.x - before.x) / scale - (mid.x - after.x) / wider, (mid.y - before.y) / scale - (mid.y - after.y) / wider);
+    check('tablet: …around the point between the fingers', drift < 3, `${drift.toFixed(1)}px off`);
+    check('tablet: …and moves no visual', (await placed()) === start);
+    // Safari sends a gesture event for the same pinch
+    await page.$eval('.d-canvas-scroll-container', (e) => e.dispatchEvent(Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 3, clientX: 100, clientY: 100 })));
+    check('tablet: …and is not zoomed again by the gesture event Safari sends for it', Math.abs((await zoom()) - wider) < 0.001, `${await zoom()}`);
+    await touch('touchEnd', []);
+    check('tablet: …leaving nothing to undo', !(await state('Undo')));
+    const trackpad = await zoom();
+    await page.$eval('.d-canvas-scroll-container', (e) => {
+      e.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { clientX: 100, clientY: 100 }));
+      e.dispatchEvent(Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 1.5, clientX: 100, clientY: 100 }));
+    });
+    check('tablet: a trackpad pinch in Safari (gesture events, no fingers down) still zooms', Math.abs((await zoom()) - trackpad * 1.5) < 0.01, `${await zoom()}`);
+
+    ({ a, b, start, scale } = await open());
+    const area = await (await page.$('.d-canvas-scroll-container')).boundingBox();
+    const [left, right] = [{ x: area.x + 6, y: area.y + 6 }, { x: area.x + 6, y: area.y + 56 }];
+    await touch('touchStart', [{ ...left, id: 1 }, { ...right, id: 2 }]);
+    await touch('touchMove', [{ x: left.x, y: left.y - 2, id: 1 }, { x: right.x, y: right.y + 30, id: 2 }]);
+    await touch('touchMove', [{ x: left.x, y: left.y - 4, id: 1 }, { x: right.x, y: right.y + 60, id: 2 }]);
+    check('tablet: a pinch on the background zooms too', (await zoom()) > scale, `${scale} -> ${await zoom()}`);
+    await touch('touchEnd', []);
+
+    // the first finger can travel before the second lands
+    ({ a, b, start, scale } = await open());
+    await touch('touchStart', [{ ...a, id: 1 }]);
+    await touch('touchMove', [{ x: a.x, y: a.y + 200, id: 1 }]);
+    const moved = (await placed()) !== start;
+    await touch('touchStart', [{ x: a.x, y: a.y + 200, id: 1 }, { ...b, id: 2 }]);
+    await touch('touchMove', [{ x: a.x, y: a.y + 300, id: 1 }, { ...b, id: 2 }]);
+    await touch('touchEnd', [{ ...b, id: 2 }]);
+    await touch('touchMove', [{ x: b.x, y: b.y + 200, id: 2 }]);
+    check('tablet: a second finger puts a visual back where the drag began', moved && (await placed()) === start, `moved ${moved}`);
+    await touch('touchEnd', []);
+    check('tablet: …leaving nothing to undo or redo', !(await state('Undo')) && !(await state('Redo')));
+
+    await touch('touchStart', [{ ...a, id: 1 }]);
+    await touch('touchMove', [{ x: a.x, y: a.y + 200, id: 1 }]);
+    await touch('touchEnd', []);
+    check('tablet: one finger still drags a visual, as one undo step', (await placed()) !== start && (await state('Undo')));
+    await page.close();
+  }
   await browser.close();
   console.log(failures ? `\n${failures} check(s) FAILED` : `\nAll checks passed. Screenshots in ${OUT}/`);
   process.exit(failures ? 1 : 0);

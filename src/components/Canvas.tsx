@@ -7,6 +7,7 @@ import { Widget, cell, sheetStyle } from './Widget';
 import { MOD, MenuEntry, openMenu } from './ContextMenu';
 import { Card } from './ui';
 import { ClearFilterIcon } from './icons';
+import { pinching } from '../runtime/tooltip';
 import { pickSummary } from '../runtime/data';
 import { datePartLabel } from '../runtime/dates';
 
@@ -17,19 +18,19 @@ const HANDLES = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 // Must match .d-canvas-scroll-container padding
 const VIEW_PAD = 24;
 
-/** Follows a pointer gesture on the window until the button is released. */
-const track = (onMove: (e: PointerEvent) => void, onEnd: () => void) => {
-  const onUp = () => {
-    onEnd();
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    window.removeEventListener('pointercancel', onUp);
-    window.removeEventListener('blur', onUp);
+/** Follows a pointer on the window until it lifts. A second finger is a pinch, which calls the gesture off. */
+const track = (start: PointerEvent, onMove: (e: PointerEvent) => void, onEnd: (pinched: boolean) => void) => {
+  const off = new AbortController();
+  const stop = (pinched = false) => {
+    off.abort();
+    onEnd(pinched);
   };
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-  window.addEventListener('pointercancel', onUp);
-  window.addEventListener('blur', onUp);
+  const mine = (f: (e: PointerEvent) => void) => (e: PointerEvent) => void (e.pointerId === start.pointerId && f(e));
+  const on = { signal: off.signal };
+  addEventListener('pointermove', mine(onMove), on);
+  for (const type of ['pointerup', 'pointercancel'] as const) addEventListener(type, mine(() => stop()), on);
+  addEventListener('blur', () => stop(), on);
+  if (start.pointerType === 'touch') addEventListener('pointerdown', () => stop(true), { ...on, capture: true });
 };
 
 export const Canvas: Component = () => {
@@ -90,13 +91,13 @@ export const Canvas: Component = () => {
 
   /** Pans by dragging: middle button anywhere, Space + drag anywhere, or a plain drag on the background. */
   const startPan = (e: PointerEvent) => {
-    if (onScrollbar(e)) return;
+    if (onScrollbar(e) || pinching()) return;
     const onBackground = !(e.target as HTMLElement).closest('.d-visual-container,input,select,textarea,button,a');
     if (!(e.button === 1 || (e.button === 0 && (spaceHeld() || onBackground)))) return;
     e.preventDefault();
     const start = { x: e.clientX, y: e.clientY, l: scrollRef.scrollLeft, t: scrollRef.scrollTop };
     panned = false;
-    track((ev) => {
+    track(e, (ev) => {
       setPanning((panned = true));
       scrollRef.scrollLeft = start.l - (ev.clientX - start.x);
       scrollRef.scrollTop = start.t - (ev.clientY - start.y);
@@ -110,6 +111,17 @@ export const Canvas: Component = () => {
 
     let ctrlDown = false;
     let gestureBase = 1;
+    // Two fingers on the view pinch it, on any touch screen: the zoom follows how far apart they are and the view follows
+    // the point between them. A phone's page isn't scaled, so its pinch stays the browser's.
+    let pinch: { x: number; y: number; apart: number; zoom: number } | null = null;
+    const fingers = (e: TouchEvent) => {
+      const [a, b, more] = [...e.touches].filter((t) => scrollRef.contains(t.target as Node));
+      return b && !more ? { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2, apart: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) } : null;
+    };
+    const touched = (e: TouchEvent) => {
+      const now = store.phone() ? null : fingers(e);
+      pinch = now && { ...now, zoom: zoom() };
+    };
     const listeners: [EventTarget, string, (e: any) => void][] = [
       // A trackpad pinch arrives as a wheel event flagged ctrlKey without Ctrl being down: it scales the sheet
       // around the pointer. A real Ctrl + wheel is left to the browser, whose page zoom resizes the whole UI.
@@ -119,14 +131,30 @@ export const Canvas: Component = () => {
         const d = Math.max(-100, Math.min(100, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
         zoomTo(zoom() * Math.exp(-d * 0.01), { x: e.clientX, y: e.clientY });
       }],
-      // Safari reports trackpad pinches as gesture events instead.
+      [scrollRef, 'touchstart', touched],
+      [scrollRef, 'touchend', touched],
+      [scrollRef, 'touchcancel', touched],
+      [scrollRef, 'touchmove', (e: TouchEvent) => {
+        const now = fingers(e);
+        if (!pinch || !now) return;
+        // a second finger landing mid-scroll: the browser already has the gesture
+        if (!e.cancelable) return void (pinch = null);
+        e.preventDefault();
+        zoomTo(pinch.zoom * (now.apart / pinch.apart), pinch);
+        scrollRef.scrollLeft += pinch.x - now.x;
+        scrollRef.scrollTop += pinch.y - now.y;
+        pinch.x = now.x;
+        pinch.y = now.y;
+      }],
+      // Safari reports trackpad pinches as gesture events instead. It sends them for a touch pinch too, without saying
+      // where the fingers are: that one's above.
       [scrollRef, 'gesturestart', (e) => {
         e.preventDefault();
         gestureBase = zoom();
       }],
       [scrollRef, 'gesturechange', (e) => {
         e.preventDefault();
-        zoomTo(gestureBase * e.scale, { x: e.clientX, y: e.clientY });
+        if (!pinch) zoomTo(gestureBase * e.scale, { x: e.clientX, y: e.clientY });
       }],
       [window, 'keydown', (e: KeyboardEvent) => {
         if (e.key === 'Control') ctrlDown = true;
@@ -152,7 +180,7 @@ export const Canvas: Component = () => {
    * Movement snaps to grid cells; the whole gesture is a single undo step.
    */
   const startDrag = (e: PointerEvent, elem: DashElement, mode: string) => {
-    if (!store.editing() || e.button !== 0 || spaceHeld() || !gridRef) return;
+    if (!store.editing() || e.button !== 0 || spaceHeld() || pinching() || !gridRef) return;
     if (mode === 'move' && (e.target as HTMLElement).closest('input,select,textarea,button,a,th,label,.d-visual-toolbar')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -168,7 +196,7 @@ export const Canvas: Component = () => {
     const pageId = currentPage().id;
     const key = `drag:${Date.now()}`;
 
-    track((ev) => {
+    track(e, (ev) => {
       const p = at(ev);
       let dx = Math.round((p.px - start.px) / colW);
       let dy = Math.round((p.py - start.py) / rowH);
@@ -192,7 +220,11 @@ export const Canvas: Component = () => {
       }
       setDragging(true);
       store.moveResizeElement(pageId, elem.id, x, y, w, h, key);
-    }, () => setDragging(false));
+    }, (pinched) => {
+      setDragging(false);
+      // what the first finger moved before the second landed wasn't a drag: it goes back, and leaves no history
+      if (pinched && (['x', 'y', 'w', 'h'] as const).some((k) => elem[k] !== start[k])) store.bail();
+    });
   };
 
   const finishRenamePage = () => {

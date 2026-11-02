@@ -145,6 +145,8 @@ function createDashboardStore() {
 
   const undo = () => restore(undoStack, redoStack);
   const redo = () => restore(redoStack, undoStack);
+  /** Takes the last step back for good, with nothing to redo: a drag that a pinch called off never happened. */
+  const bail = () => restore(undoStack, []);
 
   // --- Data ---
   /** What a long load is doing ("Reading customers: 1,234,000 rows (62%)"), shown in the status bar and splash. */
@@ -1502,6 +1504,7 @@ function createDashboardStore() {
     connectedTables: (table: string) => [...reachable(table)].filter(t => t !== table),
     undo,
     redo,
+    bail,
     canUndo: () => historyLen() >= 1000,
     canRedo: () => historyLen() % 1000 > 0,
     save,
