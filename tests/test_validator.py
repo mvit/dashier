@@ -119,6 +119,23 @@ with tempfile.TemporaryDirectory() as d:
     check('…and guesses types as the app does (slashed dates, 0/1 among true/false, a zip code stays text)', [c['type'] for c in x['structure']] == ['string', 'datetime', 'boolean', 'string'], x['structure'])
     check('…warning that dates are best written ISO', "aren't ISO" in log, log)
 
+# read_report.py takes a report back to a project (data/ + recovered.json) that rebuilds it as it was, and to DataFrames
+sys.path.insert(0, os.path.join(ROOT, 'skill/dashier-report/scripts'))
+from read_report import columns, read_doc, read_report
+with tempfile.TemporaryDirectory() as d:
+    app = os.path.join(ROOT, 'dist', 'dashier.html')
+    subprocess.run([sys.executable, os.path.join(ROOT, 'skill/dashier-report/scripts/read_report.py'), app, os.path.join(d, 'p')], check=True, capture_output=True)
+    out = os.path.join(d, 'again.html')
+    subprocess.run([sys.executable, os.path.join(ROOT, 'skill/dashier-report/scripts/build_report.py'), app, os.path.join(d, 'p', 'recovered.json'), out], check=True, capture_output=True)
+    a, b = read_doc(app), read_doc(out)
+    check('read_report.py recovers a project that rebuilds the same data and document', columns(a) == columns(b) and {**a, 'sources': 0} == {**b, 'sources': 0})
+    try:
+        import pandas
+        _, t = read_report(app)
+        sales = t['sales']
+        check('…and reads tables as DataFrames typed by their structure', str(sales['date'].dtype).startswith('datetime64') and sales['revenue'].dtype.kind == 'f' and str(sales['region'].dtype) == 'string', sales.dtypes.to_dict())
+    except ImportError:
+        print('- pandas not installed: DataFrame check skipped')
 # dashier_data.py follows the app: the same answers as its own TypeScript (bundled with esbuild, run with node)
 sys.path.insert(0, os.path.join(ROOT, 'skill/dashier-report/scripts'))
 import dashier_data as D

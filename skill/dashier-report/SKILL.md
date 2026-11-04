@@ -15,6 +15,7 @@ by you now or by the user in the editor later.
 |---|---|
 | `get_dashier.py [OUT.html]` | downloads the current editor, the template a new report is built from |
 | `build_report.py [TEMPLATE.html] DOC.json OUT.html` | writes DOC.json into a copy of the template (downloaded when none is given); a source `{"file": "data/x.csv"}` is packed and typed as the app types it |
+| `read_report.py REPORT.html [OUT_DIR] [--password PW]` | a shared report back into a project: `data/*.csv`, `recovered.json` (sources pointing at them) and a printed summary of the model; in Python, `read_report(path)` gives the tables as typed pandas DataFrames |
 | `validate_dashier.py OUT.html` | checks the model against its data and every reference; exit 0 = no FAIL. `--style` adds notes on how pages read; `--render` (Playwright) fails visuals that render empty |
 
 Open these when the step needs them, not before:
@@ -68,11 +69,16 @@ When the source changes, the user reruns the four commands: no tokens spent. For
 `make_data.py` takes the place of `extract.py`. Sources in `doc.json` point at the CSVs (`{"file":
 "data/fact_sales.csv"}`, relative to `doc.json`).
 
-### 1. Template
+### 1. Template, or a shared report
 
-A new report needs no file from the user: `build_report.py` downloads the editor when given no template. To change
-an existing report, use it as the template and build into a new file (never overwrite the original); keep its
-structure unless asked. Never decode or read the packed app (the `dashier-js` block).
+A new report needs no file from the user: `build_report.py` downloads the editor when given no template. Never
+decode or read the packed app (the `dashier-js` block).
+
+To change or analyze a report someone shared, start with `read_report.py report.html`: its printed summary is the
+model (tables, columns and types, relationships, measures, pages), so there's no need to read the document's JSON.
+Its `data/` takes the place of `extract.py`'s output, and `build_doc.py` starts from `recovered.json`, applies the
+changes and writes `doc.json`; keep the report's structure unless asked. For analysis, `read_report()` gives
+DataFrames to join along the printed relationships. Build into a new file; never overwrite the original.
 
 ### 2. Design the model
 
