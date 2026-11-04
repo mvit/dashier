@@ -69,10 +69,10 @@
           "id": "elem_table_raw", "type": "table", "x": 0, "y": 7, "w": 12, "h": 5,
           "title": "Regional Performance Breakdown", "sourceId": "regional_metrics",
           "columns": [
-            { "field": "region", "label": "Region", "align": "left" },
-            { "field": "quarter", "label": "Quarter", "align": "center" },
-            { "field": "revenue", "label": "Revenue", "align": "right", "format": "currency" },
-            { "field": "active_users", "label": "Active Users", "align": "right", "format": "number" }
+            { "field": "region", "label": "Region" },
+            { "field": "quarter", "label": "Quarter" },
+            { "field": "revenue", "label": "Revenue", "format": "currency" },
+            { "field": "active_users", "label": "Active Users", "format": "number" }
           ]
         }
       ]

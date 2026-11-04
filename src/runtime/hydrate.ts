@@ -1,5 +1,5 @@
 import { dayFirst, toISODate } from './dates';
-import { NUMBER } from './data';
+import { NUMBER, isNumberText } from './data';
 import { payloadText } from './payloads';
 import { ColumnTable, columnsFromText } from './columns';
 import { DashDataSource, ColumnSchema, DataSourceFormat, FieldType } from '../types/model';
@@ -118,7 +118,8 @@ export function parseCSV(text: string): Rows {
   return Object.defineProperty(rows, 'names', { value: headers ?? [] });
 }
 
-const csvCell = (v: string) => (/[",\r\n]/.test(v) || v !== v.trim() ? `"${v.replace(/"/g, '""')}"` : v);
+/** A CSV cell: quoted when it holds a quote, comma or line break, or spaces at its ends. */
+export const csvCell = (v: string) => (/[",\r\n]/.test(v) || v !== v.trim() ? `"${v.replace(/"/g, '""')}"` : v);
 
 /** A slice of work done: the page repaints before the next. */
 const pause = () => new Promise(r => setTimeout(r));
@@ -225,7 +226,7 @@ export function inferStructure(rows: Rows): ColumnSchema[] {
       const v = row[name], s = String(v ?? '').trim();
       if (!s) nullable = true;
       else if (typeof v === 'boolean' || /^(true|false)$/i.test(s)) seen.add('boolean');
-      else if (typeof v === 'number' || (NUMBER.test(s) && !/^[-+]?0\d/.test(s))) seen.add(Number.isInteger(+s) ? 'int' : 'float'), (bits &&= s === '0' || s === '1');
+      else if (typeof v === 'number' || isNumberText(s)) seen.add(Number.isInteger(+s) ? 'int' : 'float'), (bits &&= s === '0' || s === '1');
       else seen.add(toISODate(s) ? 'datetime' : 'string');
     }
     if (seen.has('float') || (bits && seen.has('boolean'))) seen.delete('int');

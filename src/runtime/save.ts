@@ -1,5 +1,6 @@
 import { DashDocument, createDefaultDocument } from '../types/model';
 import { expandPayloads } from './payloads';
+import { csvCell } from './hydrate';
 
 let pristineHtml = '';
 let activeFileHandle: FileSystemFileHandle | null = null;
@@ -15,6 +16,12 @@ export function capturePristine() {
   pristineHtml = pageHtml();
 }
 
+/** A document from its JSON text (which throws when it isn't JSON), or null when it has no pages. */
+export function parseDoc(text: string): DashDocument | null {
+  const d = JSON.parse(text);
+  return Array.isArray(d?.pages) && d.pages.length ? ((d.sources ||= {}), d) : null;
+}
+
 /** Reads and parses the embedded document from <script type="application/dashier+json" id="dashier-doc"> */
 export function readEmbeddedDoc(): DashDocument {
   const el = document.getElementById('dashier-doc');
@@ -22,11 +29,8 @@ export function readEmbeddedDoc(): DashDocument {
   // the document can be hundreds of MB: once read, the page keeps no copy (saving writes the current one back)
   if (el) el.textContent = '';
   try {
-    const parsed = raw?.trim() && JSON.parse(raw);
-    if (Array.isArray(parsed?.pages) && parsed.pages.length) {
-      parsed.sources ||= {};
-      return parsed;
-    }
+    const parsed = raw?.trim() && parseDoc(raw);
+    if (parsed) return parsed;
   } catch (err) {
     console.warn('[dashier] Failed to parse #dashier-doc JSON, falling back to an empty dashboard:', err);
   }
@@ -48,6 +52,10 @@ function generateSelfContainedHtml(doc: DashDocument): string {
 
 const fileName = (doc: DashDocument, ext: string) =>
   (doc.title.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '_') || 'dashboard') + ext;
+
+/** A table as a CSV file, named after `title`. */
+export const downloadCSV = (title: string, rows: string[][]) =>
+  download(new Blob([rows.map((r) => r.map(csvCell).join(',')).join('\n')], { type: 'text/csv' }), fileName({ title } as DashDocument, '.csv'));
 
 function download(content: Blob, name: string) {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(content), download: name });

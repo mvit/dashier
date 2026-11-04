@@ -1,4 +1,4 @@
-import { createSignal, createRoot, createEffect, createMemo } from 'solid-js';
+import { createSignal, createRoot, createEffect, createMemo, createComputed, batch } from 'solid-js';
 import { createStore, reconcile, unwrap } from 'solid-js/store';
 import {
   DashDocument,
@@ -24,17 +24,18 @@ import {
   resolveCanvas
 } from '../types/model';
 import { renameInTemplate, templateVariables } from './template';
-import { ChartPick, aggregate, aggregateValue, chartKind, comparison, formatValue, withUnits } from './charts';
+import { CURRENCIES, ChartPick, aggregate, aggregateValue, comparison, formatValue, setCurrency, withUnits } from './charts';
 import { hydrateSource, readColumns } from './hydrate';
 import { blobOf, hold, holdBase64, holdText, isHeld, payloadText, release } from './payloads';
 import { Lock, deriveLock, seal, unseal } from './crypt';
 import { saveDocument, exportDocumentJSON, readEmbeddedDoc } from './save';
-import { clone, compareText, compareValues, keyText, replaceFilters, shiftFilters, sortText } from './data';
+import { clone, compareText, compareValues, keyText, replaceFilters, shiftFilters, sortText, getOr } from './data';
 import { ColumnTable } from './columns';
-import { Frame, blanksOf, distinctOf, filterFrame, frameRows, joinFrame, reader, tableFrame as makeTableFrame } from './frames';
-import { DatePart, datePartKey, datePartLabel } from './dates';
+import { Frame, blanksOf, distinctOf, filterFrame, filterMask, frameRows, joinFrame, maskFrame, reader, tableFrame as makeTableFrame } from './frames';
+import { DatePart, datePartLabel, partKey } from './dates';
 import type { Order } from './charts';
 import { MeasureCtx, MeasureEnv, wheres, compileMeasure, isMeasureRef, measureError, measureFormat, measureName, measureRef } from './measures';
+import { pushDown, Place } from './layout';
 
 export type FilterScope = 'doc' | 'page' | 'visual';
 
@@ -55,15 +56,13 @@ function createDashboardStore() {
   const [activePageId, setActivePageId] = createSignal<string>((initialDoc.pages.find(p => hash.includes(p.id)) || initialDoc.pages[0])?.id || '');
   const [selectedElementId, setSelectedElementId] = createSignal<string | null>(null);
 
-  // The editor is always on; preview hides the chrome and shows the sheet as a recipient would see it. A phone (under
+  // The editor is always on; preview hides the panes and shows the sheet as a recipient would see it, with Edit to return. A phone (under
   // 640px wide) is always in preview, with the page reflowed into one column (theme.css): it views and filters.
   // or a touch screen under 500px tall: a phone on its side
   // The only definition of a phone: the app root says it with mode-phone, and theme.css lays the page out by that.
   const phone = matchMedia('(max-width: 639.98px), (pointer: coarse) and (max-height: 500px)');
   const [isPhone, setIsPhone] = createSignal(phone.matches);
   const [preview, setPreviewSignal] = createSignal(hash.includes('preview') || phone.matches);
-  // a #preview link shows the report alone; Preview from the editor keeps the top bar, with its way back
-  const [bare, setBare] = createSignal(hash.includes('preview'));
   // print mode shows every page as it will print; nothing is editable there
   const [printing, setPrintingSignal] = createSignal(false);
   const editing = () => !preview() && !printing();
@@ -170,15 +169,6 @@ function createDashboardStore() {
   async function hydrate() {
     // tables an undo took away (or renamed) leave no data behind
     setDataStore(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => isTable(k))));
-    // filters from older files name only a field: they get the table it is in (a visual's own, else one it looks up),
-    // when that's clear. A page or report filter on a name several tables share keeps applying to each.
-    const owner = (field: string, from?: string) =>
-      from && hasField(from, field) ? from : (from ? relationshipsOf(from).map(r => r.other.table) : tableIds()).filter(t => hasField(t, field)).find((t, _, all) => all.length === 1);
-    const own = (fs: DashFilter[] | undefined, from?: string) => fs?.forEach(f => f.table || !(f.table = owner(f.field, from)) && delete f.table);
-    if ([doc.filters, ...doc.pages.flatMap(p => [p.filters, ...p.elements.map(e => e.filters)])].some(fs => fs?.some(f => !f.table))) {
-      edit('filters', fs => own(fs));
-      edit('pages', pages => pages.forEach(p => (own(p.filters), p.elements.forEach(e => own(e.filters, e.sourceId)))));
-    }
     for (const id of tableIds()) {
       // payloads straight from a file (or Open JSON) are base64 text: keep them as bytes outside the JS heap
       if (!isHeld(doc.sources[id].payload)) setDoc('sources', id, 'payload', await holdBase64(doc.sources[id].payload));
@@ -256,10 +246,8 @@ function createDashboardStore() {
    * (see filterPath) as the keys of the rows that pass it. Undefined when it doesn't reach the table.
    */
   function filterOn(sourceId: string | undefined, f: DashFilter): DashFilter | undefined {
-    if (!sourceId || !active(f)) return undefined;
-    // without a table (older files): this table if it has the field, else one that has it and reaches this one
-    const from = f.table ?? (hasField(sourceId, f.field) ? sourceId : tableIds().find(t => hasField(t, f.field) && filterPath(t, f.field, sourceId)));
-    if (!from || !hasField(from, f.field)) return undefined;
+    const from = f.table;
+    if (!sourceId || !active(f) || !from || !hasField(from, f.field)) return undefined;
     if (from === sourceId) return f;
     const path = filterPath(from, f.field, sourceId);
     let g: DashFilter = f;
@@ -283,7 +271,7 @@ function createDashboardStore() {
     // a slicer loses its pick with its field
     if (e.type === 'slicer' && e.field) fn(e.field, t => (e.field = t) || (e.selection = undefined));
     for (const key of ['columns', 'rows', 'values'])
-      for (const c of e[key] || []) fn(c.field, t => (t ? ((c.label === c.field && (c.label = t)), (c.field = t)) : (e[key] = e[key].filter((x: any) => x !== c))));
+      for (const c of e[key] || []) fn(c.field, t => (t ? (c.field = t) : (e[key] = e[key].filter((x: any) => x !== c))));
   };
   /** Rewrites every field name an element reads. */
   const mapRefs = (e: any, fn: (field: string) => string) => eachRef(e, (f, set) => set(fn(f)));
@@ -299,10 +287,9 @@ function createDashboardStore() {
   /**
    * The base table's rows, merged with each table whose "table.field" columns the element uses, and the tables on
    * the way to it. A relationship's one side (`to`) is a lookup: a repeated key matches its first row, never two.
-   * `base` is the already-filtered table, so visuals that share filters share that work.
+   * `frame` is the already-filtered table, so visuals that share filters share that work.
    */
-  function joinedFrame(elem: DashElement, base?: Frame): Frame {
-    let frame = base ?? tableFrame(elem.sourceId);
+  function joinedFrame(elem: DashElement, frame: Frame): Frame {
     const home = elem.sourceId;
     if (!home) return frame;
     const used = new Set(fieldRefs(elem).map(f => refTableOf(home, f)));
@@ -339,8 +326,7 @@ function createDashboardStore() {
   createEffect(() => (activePageId(), setPicked(null)));
   function pickMark(el: ChartElement, pick?: ChartPick | null) {
     const on = (ref: string, value: string, datePart?: DatePart): DashFilter => {
-      const [table, field] = ref.includes('.') ? ref.split('.') : [el.sourceId, ref];
-      return { table, field, datePart, values: [value] };
+      return { ...describeRef(el.sourceId, ref), datePart, values: [value] };
     };
     const same = picked()?.from === el.id && picked()?.mark === pick?.mark;
     setPicked(!pick || same ? null : { from: el.id, mark: pick.mark, filters: [on(el.mapping.x!, pick.x, el.dateParts?.x), ...(pick.group == null ? [] : [on(el.mapping.group!, pick.group, el.dateParts?.group)])] });
@@ -349,13 +335,27 @@ function createDashboardStore() {
   /** Filtered whole tables, shared by visuals that see the same filters; a new map when the data or those filters change. */
   const frameCache = createMemo(() => (dataStore(), doc.filters, doc.relationships, doc.pages.forEach(p => (p.filters, p.elements.forEach(e => (e.filters, (e as SlicerElement).selection)))), new Map<string, Frame>()));
 
-  /** Applies report-, page-, slicer- and visual-level filters (which follow relationships) to a frame on `sourceId`. */
-  function filterRows(sourceId: string | undefined, frame: Frame, filters: DashFilter[]): Frame {
-    const applied = filters.flatMap(f => filterOn(sourceId, f) ?? []);
-    if (frame.base.ids) return filterFrame(frame, applied);
-    const cache = frameCache(), key = (sourceId ?? '') + JSON.stringify(filters);
-    let g = cache.get(key);
-    return g || (cache.set(key, (g = filterFrame(frame, applied))), g);
+  /** A table's rows after report-, page-, slicer- and visual-level filters (which follow relationships). */
+  function filterRows(sourceId: string | undefined, filters: DashFilter[]): Frame {
+    return getOr(frameCache(), (sourceId ?? '') + JSON.stringify(filters), () => {
+      const frame = tableFrame(sourceId);
+      return maskFrame(frame, filters.flatMap(f => filterOn(sourceId, f) ?? []).flatMap(f => maskOf(sourceId, frame, f) ?? []));
+    });
+  }
+
+  /**
+   * Which rows of a table pass one filter, kept for as long as the data is: when one slicer changes, every visual
+   * tests only that one again (as Crossfilter does), and the others' rows come from here.
+   */
+  const masks = createMemo(() => (dataStore(), new Map<string, Uint8Array | null>()));
+  function maskOf(sourceId: string | undefined, frame: Frame, f: DashFilter) {
+    const cache = masks(), key = (sourceId ?? '') + '\u0000' + JSON.stringify(f);
+    if (!cache.has(key)) {
+      // a viewer can try many picks: past a few dozen, start over
+      if (cache.size > 64) cache.clear();
+      cache.set(key, filterMask(frame, f));
+    }
+    return cache.get(key);
   }
 
   /**
@@ -370,7 +370,7 @@ function createDashboardStore() {
 
   /** What an element reads: its table's rows after filters (shared with the same filters), then the joins it needs. */
   function getFrame(elem: DashElement): Frame {
-    return joinedFrame(elem, filterRows(elem.sourceId, tableFrame(elem.sourceId), filtersOf(elem)));
+    return joinedFrame(elem, filterRows(elem.sourceId, filtersOf(elem)));
   }
 
   /**
@@ -380,9 +380,9 @@ function createDashboardStore() {
   function slicerOptions(elem: SlicerElement): { values: string[]; min?: number; max?: number } {
     if (!elem.field) return { values: [] };
     const all = tableFrame(elem.sourceId);
-    const frame = filterRows(elem.sourceId, all, filtersOf(elem, elem.id));
+    const frame = filterRows(elem.sourceId, filtersOf(elem, elem.id));
     const { field, datePart } = elem;
-    const values = sortText(distinctOf(frame, field, datePart ? (v) => datePartKey(String(v), datePart) : String));
+    const values = sortText(distinctOf(frame, field, partKey(datePart)));
     const cmp = !datePart && sortOrder(elem.sourceId, field);
     if (cmp) values.sort(cmp);
     const bound = (m: 'min' | 'max') => (isNumericType(refType(elem.sourceId, field)) ? aggregate(all, m, field) ?? undefined : undefined);
@@ -447,7 +447,7 @@ function createDashboardStore() {
   function templateVars(elem: DashElement): Record<string, unknown> {
     const vars: Record<string, unknown> = {};
     const page = pageFor(elem);
-    const rowsOf = (table: string) => filterRows(table, tableFrame(table), filtersOf(elem));
+    const rowsOf = (table: string) => filterRows(table, filtersOf(elem));
     // a field's values as an array, a whole table as row objects (only when a template uses it), first LIST_ROWS only:
     // a text box listing millions of rows would freeze the page
     const values = (frame: Frame, field: string) => {
@@ -501,7 +501,7 @@ function createDashboardStore() {
   const setPrinting = deselecting(setPrintingSignal);
   addEventListener('beforeprint', () => setPrinting(true));
   addEventListener('afterprint', () => setPrinting(false));
-  const setPreview = deselecting((on) => (setPreviewSignal(on), on || setBare(false)));
+  const setPreview = deselecting((on) => setPreviewSignal(on));
   phone.onchange = (e) => (setIsPhone(e.matches), setPreview(e.matches));
 
   /**
@@ -532,6 +532,16 @@ function createDashboardStore() {
   function setTheme(patch: DashTheme, replace = false) {
     pushHistory(replace ? '' : `theme:${Object.keys(patch).join()}`);
     setDoc('theme', reconcile(clone(replace ? patch : { ...doc.theme, ...patch })));
+  }
+
+  // every "currency" format is in the report's currency (set before anything is drawn in it)
+  createComputed(() => setCurrency(doc.currency || CURRENCIES[0]));
+  /** Sets the report's currency (the default, USD, is stored as unset). */
+  function setReportCurrency(c: string) {
+    const next = c === CURRENCIES[0] ? undefined : c;
+    if (next === doc.currency) return;
+    pushHistory('currency');
+    setDoc('currency', next);
   }
 
   /** Sets the report page's fixed size (px). */
@@ -647,7 +657,7 @@ function createDashboardStore() {
     const col = m?.columns?.[0];
     // What carries over: a value, a category (a chart's axis, a scatter's details, a matrix's first row field) and
     // a legend (a matrix's first column field). A scatter's x is a number, so a category becomes its details.
-    const fromScatter = elem.type === 'chart' && chartKind(elem.chartType) === 'scatter';
+    const fromScatter = elem.type === 'chart' && elem.chartType === 'scatter';
     const field = elem.mapping?.y || elem.aggregation?.field || m?.values?.[0]?.field || (elem.type === 'slicer' ? elem.field : undefined);
     const cat = fromScatter ? elem.mapping?.detail : elem.mapping?.x ?? row?.field;
     const catPart = fromScatter ? elem.dateParts?.detail : elem.dateParts?.x ?? row?.datePart;
@@ -690,13 +700,13 @@ function createDashboardStore() {
       next = { ...keep, type: 'card', aggregation: { method, field }, format: elem.format ?? elem.options?.format ?? m?.values?.[0]?.format };
     } else if (targetType === 'table' && m) {
       // a matrix's row and column fields become plain columns, its values summarized ones
-      const plain = [...(m.rows ?? []), ...(m.columns ?? [])].map(f => ({ field: f.field, label: f.field, datePart: f.datePart }));
-      const values = (m.values ?? []).map((v: any) => ({ field: v.field, label: v.field, align: 'right' as const, aggregate: isMeasureRef(v.field) ? undefined : v.aggregate ?? 'sum', showAs: v.showAs, format: v.format, cond: v.cond }));
+      const plain = [...(m.rows ?? []), ...(m.columns ?? [])].map(f => ({ field: f.field, datePart: f.datePart }));
+      const values = (m.values ?? []).map((v: any) => ({ field: v.field, aggregate: isMeasureRef(v.field) ? undefined : v.aggregate ?? 'sum', showAs: v.showAs, format: v.format, cond: v.cond }));
       next = { ...keep, type: 'table', columns: [...plain, ...values] };
     } else if (targetType === 'table') {
       // a chart's category and legend become plain columns, its value a summarized one
-      const col = (f: string, datePart?: DatePart) => ({ field: f, label: f, datePart, align: alignOf(refType(elem.sourceId, f)) });
-      const columns = [cat && col(cat, catPart), group && col(group, groupPart), field && { ...col(field), align: 'right' as const, aggregate: isMeasureRef(field) ? undefined : agg ?? 'sum', showAs: elem.summary?.showAs }].filter(Boolean);
+      const col = (f: string, datePart?: DatePart) => ({ field: f, datePart });
+      const columns = [cat && col(cat, catPart), group && col(group, groupPart), field && { field, aggregate: isMeasureRef(field) ? undefined : agg ?? 'sum', showAs: elem.summary?.showAs }].filter(Boolean);
       next = { ...keep, type: 'table', columns: columns.length ? columns : undefined, sourceId: columns.length ? keep.sourceId : undefined };
     } else if (targetType === 'slicer') {
       const sf = cat || elem.mapping?.x || field;
@@ -711,10 +721,9 @@ function createDashboardStore() {
   }
 
   type Slot = 'x' | 'y' | 'group' | 'line' | 'detail' | 'field' | 'column' | 'row' | 'col' | 'value';
+  /** Where a chart slot's summary is kept (a scatter's x only). */
+  const SUMMARY_OF: Partial<Record<Slot, string>> = { y: 'summary', line: 'lineSummary', x: 'xSummary' };
   const matrixList = (slot: Slot) => (slot === 'row' ? 'rows' : slot === 'col' ? 'columns' : 'values');
-
-  const alignOf = (type?: FieldType) => (isNumericType(type) ? 'right' : 'left') as 'right' | 'left';
-  const defaultColumns = (sourceId: string) => fieldsOf(sourceId).map(f => ({ field: f.name, label: f.name, align: alignOf(f.type) }));
 
   /** A note about the last drop (shown in the Visualizations pane): why a field was refused. */
   const [dropNote, setDropNote] = createSignal('');
@@ -726,7 +735,7 @@ function createDashboardStore() {
    */
   function assignField(elem: DashElement, slot: Slot, f: { table: string; field: string; aggregate?: AggregationMethod; showAs?: ShowAs }): boolean {
     const e = elem as any;
-    const scatter = e.type === 'chart' && chartKind(e.chartType) === 'scatter';
+    const scatter = e.type === 'chart' && e.chartType === 'scatter';
     if (isMeasureRef(f.field)) {
       // a measure is a number of its own table: it goes in value wells only (both of a scatter's axes are values)
       if (e.type === 'slicer' || !['y', 'line', 'field', 'column', 'value', ...(scatter ? ['x'] : [])].includes(slot)) {
@@ -764,22 +773,18 @@ function createDashboardStore() {
       const method = fitMethod('sum', f);
       updates[key] = [...list, slot === 'value' ? { field: ref, aggregate: method === 'sum' ? undefined : method } : { field: ref, datePart: isDateField(f) ? 'month' : undefined }];
     } else if (slot === 'column') {
-      const cols = empty ? [] : e.columns?.length ? e.columns : defaultColumns(e.sourceId);
-      updates.columns = [...cols.filter((c: any) => c.field !== ref), { field: ref, label: ref, align: alignOf(typeOf(f)) }];
+      updates.columns = [...(empty ? [] : e.columns ?? []).filter((c: any) => c.field !== ref), { field: ref }];
     } else if (slot === 'field') {
       updates.aggregation = { method: fitMethod(f.aggregate || e.aggregation?.method || 'sum', f, true), field: ref };
       if (isMeasureRef(ref)) updates.format = undefined; // a measure shows in its own format
     } else {
       updates.mapping = { ...(empty ? {} : e.mapping), [slot]: ref };
-      if (slot === 'y') {
-        // a pill moved here keeps its own summary; a new field takes the slot's
-        const m = fitMethod(f.aggregate || e.summary?.aggregate || 'sum', f);
-        const showAs = f.aggregate ? f.showAs : e.summary?.showAs;
-        updates.summary = m === 'sum' && !showAs ? undefined : { aggregate: m === 'sum' ? undefined : m, showAs };
-      } else if (slot === 'line' || (slot === 'x' && scatter)) {
-        const key = slot === 'x' ? 'xSummary' : 'lineSummary';
+      const key = SUMMARY_OF[slot];
+      if (key && (slot !== 'x' || scatter)) {
+        // a pill moved here keeps its own summary; a new field takes the slot's (values shown as: y only)
         const m = fitMethod(f.aggregate || e[key]?.aggregate || 'sum', f);
-        updates[key] = m === 'sum' ? undefined : { aggregate: m };
+        const showAs = slot !== 'y' ? undefined : f.aggregate ? f.showAs : e.summary?.showAs;
+        updates[key] = m === 'sum' && !showAs ? undefined : { aggregate: m === 'sum' ? undefined : m, showAs };
       }
       // dates on an axis, legend or details start grouped by month
       else if (slot === 'x' || slot === 'group' || slot === 'detail') updates.dateParts = { ...(empty ? {} : e.dateParts), [slot]: isDateField(f) ? 'month' : undefined };
@@ -804,13 +809,13 @@ function createDashboardStore() {
     const updates: any = {};
     const key = matrixList(slot);
     if (e.type === 'matrix') updates[key] = (e[key] || []).filter((c: any) => c.field !== ref);
-    else if (slot === 'column') updates.columns = (e.columns?.length ? e.columns : e.sourceId ? defaultColumns(e.sourceId) : []).filter((c: any) => c.field !== ref);
+    else if (slot === 'column') updates.columns = (e.columns ?? []).filter((c: any) => c.field !== ref);
     else if (slot === 'field' && e.type === 'slicer') updates.field = updates.selection = undefined;
     else if (slot === 'field') updates.aggregation = undefined;
     else {
       // the slot's summary and date grouping go with its field, so the next field starts fresh
       updates.mapping = { ...e.mapping, [slot]: undefined };
-      const sum = ({ y: 'summary', line: 'lineSummary', x: 'xSummary' } as any)[slot];
+      const sum = SUMMARY_OF[slot];
       if (sum) updates[sum] = undefined;
       if (e.dateParts?.[slot]) updates.dateParts = { ...e.dateParts, [slot]: undefined };
     }
@@ -860,7 +865,11 @@ function createDashboardStore() {
   }
 
   /** Clamped grid move/resize. Repeated calls with the same `historyKey` form one undo step. */
-  function moveResizeElement(pageId: string, elementId: string, x: number, y: number, w: number, h: number, historyKey?: string) {
+  /**
+   * Moves or resizes a visual. With `before` (the page's places as a drag began), the visuals it lands on move down
+   * out of its way, and those it no longer covers go back to where they were.
+   */
+  function moveResizeElement(pageId: string, elementId: string, x: number, y: number, w: number, h: number, historyKey?: string, before?: Place[]) {
     const [pi, ei] = locate(pageId, elementId);
     if (ei === -1) return;
     w = Math.max(1, Math.min(12, w));
@@ -873,7 +882,15 @@ function createDashboardStore() {
     const next = { x, y: Math.max(0, y), w, h };
     if (Object.entries(next).every(([k, v]) => cur[k] === v)) return;
     pushHistory(historyKey ?? `geom:${elementId}`);
-    setDoc('pages', pi, 'elements', ei, next);
+    batch(() => {
+      setDoc('pages', pi, 'elements', ei, next);
+      if (!before) return;
+      const pushed = pushDown(before, { id: elementId, ...next });
+      doc.pages[pi].elements.forEach((e, i) => {
+        const y = pushed.get(e.id) ?? before.find((p) => p.id === e.id)?.y;
+        if (e.id !== elementId && y != null && y !== e.y) setDoc('pages', pi, 'elements', i, 'y', y);
+      });
+    });
   }
 
   // --- Filters ---
@@ -892,16 +909,14 @@ function createDashboardStore() {
     }
   }
 
-  /** Distinct values of a filter's field: of its table, or (older filters) across every loaded table. */
+  /** Distinct values of a filter's field, in its column's order. */
   function distinctValues(f: DashFilter): string[] {
-    const set = new Set<string>();
-    for (const [id, table] of Object.entries(dataStore())) if ((!f.table || f.table === id) && f.field in table.columns) for (const v of distinctOf(makeTableFrame(table), f.field)) set.add(v);
-    const cmp = f.table && sortOrder(f.table, f.field);
-    return cmp ? [...set].sort(cmp) : sortText([...set]);
+    const vs = f.field in (dataStore()[f.table!]?.columns ?? {}) ? [...distinctOf(tableFrame(f.table), f.field)] : [];
+    const cmp = sortOrder(f.table!, f.field);
+    return cmp ? vs.sort(cmp) : sortText(vs);
   }
 
-  /** A filter's field type: from its table, or the first table with the field. */
-  const filterType = (f: DashFilter) => (f.table ? typeOf({ table: f.table, field: f.field }) : (allFields().find(x => x.name === f.field)?.type as FieldType));
+  const filterType = (f: DashFilter) => typeOf(f as { table: string; field: string });
   const isDateFilter = (f: DashFilter) => filterType(f) === 'datetime';
 
   /**
@@ -918,13 +933,6 @@ function createDashboardStore() {
   }
 
   const distinct = (table: string, field: string) => distinctValues({ table, field });
-
-  /** Every field name across sources, with the type from its first schema. */
-  const allFields = createMemo(() => {
-    const map = new Map<string, string>();
-    for (const src of Object.values(doc.sources)) for (const f of src.structure) if (!map.has(f.name)) map.set(f.name, f.type);
-    return [...map].map(([name, type]) => ({ name, type }));
-  });
 
   // --- Measures ---
   const measuresOf = (table: string) => (doc.measures || []).filter(m => m.table === table);
@@ -963,15 +971,14 @@ function createDashboardStore() {
    */
   function cellContext(elem: DashElement): (frame: Frame) => MeasureCtx {
     const e = elem as any;
-    const scatter = e.type === 'chart' && chartKind(e.chartType) === 'scatter';
+    const scatter = e.type === 'chart' && e.chartType === 'scatter';
     const groups: { ref: string; part?: DatePart }[] =
       e.type === 'chart' ? (['x', 'group', 'detail'] as const).filter(k => e.mapping?.[k] && !(scatter && k === 'x')).map(k => ({ ref: e.mapping[k], part: e.dateParts?.[k] }))
       : e.type === 'matrix' ? [...(e.rows || []), ...(e.columns || [])].map((f: any) => ({ ref: f.field, part: f.datePart }))
       : e.type === 'table' ? (e.columns || []).filter((c: any) => !c.aggregate && !isMeasureRef(c.field)).map((c: any) => ({ ref: c.field, part: c.datePart }))
       : [];
     const frames = new Map<string, Frame>();
-    const frameOf = (t: string) => frames.get(t) ?? frames.set(t, filterRows(t, tableFrame(t), filtersOf(elem))).get(t)!;
-    const keyOf = (part?: DatePart) => (part ? (v: unknown) => datePartKey(String(v), part) : String);
+    const frameOf = (t: string) => getOr(frames, t, () => filterRows(t, filtersOf(elem)));
     const totals = new Map<string, number>();
     let full: Frame | undefined;
     return (frame) => {
@@ -980,9 +987,9 @@ function createDashboardStore() {
         frameOf,
         filters: () =>
           (filters ??= groups.flatMap(({ ref, part }) => {
-            const values = distinctOf(frame, ref, keyOf(part));
+            const values = distinctOf(frame, ref, partKey(part));
             const id = `${ref}\u0000${part ?? ''}`;
-            if (!totals.has(id)) totals.set(id, distinctOf((full ??= getFrame(elem)), ref, keyOf(part)).length);
+            if (!totals.has(id)) totals.set(id, distinctOf((full ??= getFrame(elem)), ref, partKey(part)).length);
             if (values.length >= totals.get(id)!) return [];
             const { table, field } = describeRef(elem.sourceId, ref);
             return [{ table, field, datePart: part, values: values.length ? values : ['\u0000'] }];
@@ -1043,7 +1050,12 @@ function createDashboardStore() {
     fn(list);
     (setDoc as any)(key, reconcile(list));
   }
-
+  /** Every page's lists of filters: its own, and each visual's (and their comparisons'). */
+  const pageFilters = (pages: DashPage[]) => pages.flatMap(p => [p.filters, ...p.elements.flatMap(filterLists)]);
+  /** Edits every list of filters in the document. */
+  const editFilters = (fn: (fs?: DashFilter[]) => void) => (edit('filters', fn), edit('pages', ps => pageFilters(ps).forEach(fn)));
+  /** Edits both ends of every relationship. */
+  const editEnds = (fn: (end: End) => unknown) => edit('relationships', rels => rels.flatMap(r => [r.from, r.to]).forEach(fn));
   /**
    * Renames (or with `to` null, removes) the reference `from` in every visual and text binding on a table `owns`
    * (where `from` means the field or measure being changed); `via`: how visuals on other tables reach it, removed too.
@@ -1144,14 +1156,14 @@ function createDashboardStore() {
    */
   function columnUses(table: string): Map<string, string[]> {
     const uses = new Map<string, Set<string>>();
-    const add = (col: string | undefined, what: string) => col && (uses.get(col) ?? uses.set(col, new Set()).get(col)!).add(what);
+    const add = (col: string | undefined, what: string) => col && getOr(uses, col, () => new Set<string>()).add(what);
     for (const u of usagesOf(table)) for (const f of u.fields) add(f, `${u.element.title || u.element.type} (${u.page.title})`);
     for (const r of relationshipsOf(table)) add(r.mine.field, `the relationship with ${r.other.table}`);
     for (const m of doc.measures || []) {
       if (m.table === table) [m.field, m.a?.field, m.b?.field].forEach(f => add(f, `measure ${m.name}`));
       for (const w of wheres(m)) if ((w.table ?? m.table) === table) add(w.field, `measure ${m.name}`);
     }
-    for (const fs of [doc.filters, ...doc.pages.flatMap(p => [p.filters, ...p.elements.flatMap(filterLists)])]) for (const f of fs || []) if (f.table === table) add(f.field, 'a filter');
+    for (const fs of [doc.filters, ...pageFilters(doc.pages)]) for (const f of fs || []) if (f.table === table) add(f.field, 'a filter');
     for (const c of fieldsOf(table)) add(c.sortBy, `the order of ${c.name}`);
     return new Map([...uses].map(([c, s]) => [c, [...s]]));
   }
@@ -1227,12 +1239,9 @@ function createDashboardStore() {
     pushHistory();
     const tables = tableIds();
     setDoc('sources', reconcile(renameKey(clone(doc.sources), from, to)));
-    const moveFilters = (fs?: DashFilter[]) => fs?.forEach(f => f.table === from && (f.table = to));
-    edit('filters', moveFilters);
+    editFilters(fs => fs?.forEach(f => f.table === from && (f.table = to)));
     edit('pages', pages => {
-      pages.forEach(p => moveFilters(p.filters));
       for (const e of pages.flatMap(p => p.elements)) {
-        filterLists(e).forEach(moveFilters);
         // a text box naming the table (and not a variable of its own of that name) follows
         const el = e as any;
         if (el.content && !el.bindings?.[from]) el.content = renameInTemplate(el.content, n => (n === from ? to : n));
@@ -1242,7 +1251,7 @@ function createDashboardStore() {
         for (const b of Object.values((e as any).bindings || {}) as { table: string }[]) if (b.table === from) b.table = to;
       }
     });
-    edit('relationships', rels => rels.flatMap(r => [r.from, r.to]).forEach(end => end.table === from && (end.table = to)));
+    editEnds(end => end.table === from && (end.table = to));
     edit('measures', ms =>
       ms.forEach(m => {
         if (m.table === from) m.table = to;
@@ -1277,18 +1286,10 @@ function createDashboardStore() {
     srcVer++;
 
     const swap = (name: string) => (name === from ? to : name);
-    // a filter on this table's column follows; one without a table (older files) does when the visual is on this table
-    // or, for page and report filters, when no other table has the name. Otherwise this table gets a copy of it.
-    const swapFilters = (fs: DashFilter[] | undefined, mine: boolean) =>
-      fs?.slice().forEach(f => {
-        if (f.field !== from || (f.table ? f.table !== sourceId : !mine && !sharedElsewhere)) return;
-        if (f.table || mine) f.field = to;
-        else fs.push({ ...f, field: to, table: sourceId });
-      });
-    const sharedElsewhere = Object.entries(doc.sources).some(([id, s]) => id !== sourceId && s.structure.some(c => c.name === from));
+    // a filter on this table's column follows
+    editFilters(fs => fs?.forEach(f => f.table === sourceId && (f.field = swap(f.field))));
     edit('pages', pages => {
       for (const p of pages) {
-        swapFilters(p.filters, !sharedElsewhere);
         for (const el of p.elements) {
           const binds = (el as any).bindings || {};
           const bound = Object.values(binds) as { table: string; field?: string }[];
@@ -1296,15 +1297,12 @@ function createDashboardStore() {
           // in a text box, the name inside a section that lists this table's rows
           const rowsOfThis = (s?: string) => !!s && (binds[s] ? binds[s].table === sourceId && !binds[s].field : s === sourceId || (s === 'rows' && el.sourceId === sourceId));
           if ((el as any).content) (el as any).content = renameInTemplate((el as any).content, (n, within) => (n === from && rowsOfThis(within.at(-1)) ? to : n));
-          const mine = el.sourceId === sourceId || (!el.sourceId && bound.some(b => b.table === sourceId));
-          for (const fs of filterLists(el)) swapFilters(fs, mine);
           if (el.sourceId === sourceId) mapRefs(el, swap);
           else mapRefs(el, f => (f === `${sourceId}.${from}` ? `${sourceId}.${to}` : f)); // reached through a connection
         }
       }
     });
-    edit('filters', fs => swapFilters(fs, !sharedElsewhere));
-    edit('relationships', rels => rels.flatMap(r => [r.from, r.to]).forEach(end => end.table === sourceId && (end.field = swap(end.field))));
+    editEnds(end => end.table === sourceId && (end.field = swap(end.field)));
     edit('measures', ms => {
       for (const m of ms) {
         // a where on this table's column, from a measure of this table or of another one
@@ -1326,14 +1324,10 @@ function createDashboardStore() {
     if (doc.relationships?.some(touches)) setDoc('relationships', rels => rels!.filter(r => !touches(r)));
     if (doc.measures?.some(m => m.table === id)) setDoc('measures', ms => ms!.filter(m => m.table !== id));
     // visuals on it are left empty; others lose what they read of it (fields, bindings, filters)
-    // (a filter without a table goes when no table left has its field)
-    const keep = (fs?: DashFilter[]) => fs?.splice(0, fs.length, ...fs.filter(f => (f.table ? f.table !== id : tableIds().some(t => hasField(t, f.field)))));
-    edit('filters', keep);
+    editFilters(fs => fs?.splice(0, fs.length, ...fs.filter(f => f.table !== id)));
     edit('pages', pages => {
       for (const p of pages) {
-        keep(p.filters);
         for (const e of p.elements as any[]) {
-          filterLists(e).forEach(keep);
           for (const [k, b] of Object.entries(e.bindings || {}) as [string, any][]) if (b.table === id) delete e.bindings[k];
           if (e.sourceId !== id) dropRefs(e, f => refTableOf(e.sourceId, f, tables) === id);
           else {
@@ -1414,7 +1408,6 @@ function createDashboardStore() {
     doc,
     editing,
     phone: isPhone,
-    bare,
     picked,
     pickMark,
     clearPick: () => setPicked(null),
@@ -1443,6 +1436,7 @@ function createDashboardStore() {
     setTheme,
     canvasSize,
     setCanvas,
+    setReportCurrency,
     isDirty,
     isSaving,
     hydrate,
@@ -1491,7 +1485,6 @@ function createDashboardStore() {
     describeRef,
     assignField,
     clearField,
-    defaultColumns,
     dropNote,
     setDropNote,
     saveRelationship,

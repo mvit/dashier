@@ -22,7 +22,7 @@ export interface MeasureEnv {
   across: (table: string, ctx?: MeasureCtx) => Frame;
 }
 
-const LOCAL: MeasureEnv = { narrow: (frame, table, f) => (f.table && f.table !== table ? frame : filterFrame(frame, [f])), across: () => tableFrame() };
+const LOCAL: MeasureEnv = { narrow: (frame, table, f) => (f.table !== table ? frame : filterFrame(frame, [f])), across: () => tableFrame() };
 
 /** A measure's conditions as a list (`where` is one or several; all must hold). */
 export const wheres = (m?: DashMeasure): MeasureWhere[] => (!m?.where ? [] : Array.isArray(m.where) ? m.where : [m.where]);
@@ -59,7 +59,7 @@ export function compileMeasure(all: DashMeasure[], table: string, name: string, 
       return x == null || y == null ? null : calc(x, y);
     };
   }
-  const only: DashFilter[] = wheres(m).filter(w => w.values?.length).map(w => ({ field: w.field, table: w.table, values: w.values }));
+  const only: DashFilter[] = wheres(m).filter(w => w.values?.length).map(w => ({ field: w.field, table: w.table ?? table, values: w.values }));
   return frame => aggregate(only.reduce((f, w) => env.narrow(f, table, w), frame), m.aggregate || 'sum', m.field);
 }
 const CALC: Record<MeasureOp, (x: number, y: number) => number | null> = {

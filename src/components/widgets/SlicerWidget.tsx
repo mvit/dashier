@@ -1,15 +1,15 @@
-import { Component, For, Show, createMemo, createSignal } from 'solid-js';
+import { Component, For, Show, createMemo } from 'solid-js';
 import { SlicerElement, isNumericType } from '../../types/model';
 import { store } from '../../runtime/store';
 import { datePartLabel } from '../../runtime/dates';
-import { ClearFilterIcon } from '../icons';
-import { Check, RangeInputs, Search } from '../ui';
+import { ClearButton } from '../icons';
+import { RangeInputs, CheckList } from '../ui';
 import { empty } from './CardWidget';
+import { toggled } from '../../runtime/data';
 
 /** A slicer: picking values here filters every other visual on the page. */
 export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
   const el = () => props.element;
-  const [search, setSearch] = createSignal('');
   const options = createMemo(() => store.slicerOptions(el()));
   const type = () => store.refType(el().sourceId, el().field);
   const numeric = () => isNumericType(type());
@@ -25,7 +25,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
   const toggle = (v: string) => {
     const cur = picked();
     if (el().single) setValues(cur.length === 1 && cur[0] === v ? [] : [v]);
-    else setValues(cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]);
+    else setValues(toggled(cur, v));
   };
   const setBound = (key: 'min' | 'max', raw: string) => {
     const next = { ...sel(), [key]: raw === '' ? undefined : Number(raw) };
@@ -35,12 +35,6 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
     select(next);
   };
 
-  const shown = () => {
-    const q = search().toLowerCase();
-    return q ? options().values.filter(v => show(v).toLowerCase().includes(q)) : options().values;
-  };
-  const active = () => picked().length > 0 || sel()?.min != null || sel()?.max != null || !!(sel()?.from || sel()?.to);
-
   const slider = (key: 'min' | 'max') => (
     <input type="range" min={options().min} max={options().max} step="any" value={sel()?.[key] ?? options()[key]} onChange={(e) => setBound(key, e.currentTarget.value)} />
   );
@@ -49,10 +43,8 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
     <div class="d-slicer">
       <div class="d-slicer-header">
         <span class="d-slicer-title">{el().title || el().field || 'Slicer'}</span>
-        <Show when={active()}>
-          <button class="d-slicer-clear" title="Clear selection" onClick={() => select(undefined)}>
-            <ClearFilterIcon />
-          </button>
+        <Show when={sel()}>
+          <ClearButton class="d-slicer-clear" title="Clear selection" onClick={() => select(undefined)} />
         </Show>
       </div>
 
@@ -74,7 +66,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
         <Show when={style() === 'dropdown'}>
           <select
             class="d-well-select d-slicer-dropdown"
-            value={el().single || picked().length <= 1 ? picked()[0] ?? '' : ''}
+            value={picked().length <= 1 ? picked()[0] ?? '' : ''}
             onChange={(e) => setValues(e.currentTarget.value ? [e.currentTarget.value] : [])}
           >
             <option value="">{picked().length > 1 ? `${picked().length} selected` : 'All'}</option>
@@ -95,18 +87,7 @@ export const SlicerWidget: Component<{ element: SlicerElement }> = (props) => {
         </Show>
 
         <Show when={style() === 'list'}>
-          <Show when={options().values.length > 8}>
-            <Search class="d-input d-slicer-search" value={search()} set={setSearch} />
-          </Show>
-          <div class="d-slicer-list">
-            <For each={shown().slice(0, 500)}>
-              {(v) => (
-                <Check radio={el().single} checked={picked().includes(v)} set={() => toggle(v)}>
-                  {show(v)}
-                </Check>
-              )}
-            </For>
-          </div>
+          <CheckList class="d-slicer-list" values={options().values} label={show} on={(v) => picked().includes(v)} flip={toggle} radio={el().single} search={8} />
         </Show>
       </Show>
     </div>

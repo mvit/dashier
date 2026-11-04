@@ -57,11 +57,10 @@ export const App: Component = () => {
       e.preventDefault();
       return store.save(false);
     }
-    if (esc && dialog()) return close();
     if (esc && store.picked()) return store.clearPick();
     if (esc && store.preview()) return store.setPreview(false);
     // an open dialog or menu has the keyboard: nothing behind it moves, deletes or undoes
-    if (dialog() || document.querySelector('.d-context-menu,.d-field-menu')) return;
+    if (document.querySelector('.modal-backdrop,.d-context-menu,.d-field-menu')) return;
     if (!store.editing() || (e.target as HTMLElement).closest?.('input,textarea,select,[contenteditable]')) return;
     if (esc) return store.setSelectedElementId(null);
 
@@ -97,9 +96,7 @@ export const App: Component = () => {
       class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() && !store.printing() ? 'mode-phone mode-sheet' : ''}`}
       data-theme={store.isDark() ? 'dark' : 'light'}
     >
-      <Show when={!store.bare()}>
-        <TopBar onAbout={() => setDialog({ about: true })} onExportJSON={() => setDialog({ exportJSON: true })} />
-      </Show>
+      <TopBar onAbout={() => setDialog({ about: true })} onExportJSON={() => setDialog({ exportJSON: true })} />
 
       <div class="ed-main">
         <div class="ed-canvas-area">
@@ -128,11 +125,6 @@ export const App: Component = () => {
         <PrintView />
       </Show>
 
-      <Show when={store.bare()}>
-        <button class="btn-secondary d-exit-preview" title="Back to the editor (Esc)" onClick={() => store.setPreview(false)}>
-          ✎ Edit
-        </button>
-      </Show>
 
       <Show when={dialog()?.add}>
         <AddDataDialog onClose={close} />
@@ -141,22 +133,21 @@ export const App: Component = () => {
         {(id) => <EditDataDialog id={id()} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
       </Show>
       <Show when={dialog()?.about}>
-        <Modal class="d-small d-about" title="Dashier" subtitle="Your report and data in one editable HTML file." onClose={close}>
+        <Modal class="d-small d-about" title="Dashier" subtitle="Your report and data in one editable HTML file." onClose={close} ok="Done" onOk={close}>
           <div class="modal-body">
             <p>Made by mvit and Opus 5.5 · <a href={GITHUB} target="_blank" rel="noopener">GitHub</a></p>
-          </div>
-          <div class="modal-footer">
-            <button class="btn-primary" onClick={close}>Done</button>
           </div>
         </Modal>
       </Show>
       <Show when={dialog()?.exportJSON}>
-        <Modal class="d-small d-export-warn" title="Export readable data?" subtitle="The JSON file will contain unencrypted data. Anyone with the file can read it without a password." onClose={close}>
-          <div class="modal-footer">
-            <button class="btn-secondary" onClick={close}>Cancel</button>
-            <button class="btn-primary" onClick={() => (close(), store.exportJSON())}>Export JSON</button>
-          </div>
-        </Modal>
+        <Modal
+          class="d-small d-export-warn"
+          title="Export readable data?"
+          subtitle="The JSON file will contain unencrypted data. Anyone with the file can read it without a password."
+          onClose={close}
+          ok="Export JSON"
+          onOk={() => (close(), store.exportJSON())}
+        />
       </Show>
       <Show when={dialog()?.measure}>{(m) => <MeasureDialog table={m().table} name={m().name} field={m().field} onClose={close} />}</Show>
       <Show when={dialog()?.replace}>

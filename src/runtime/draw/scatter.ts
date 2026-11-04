@@ -10,8 +10,9 @@
 import { ChartElement } from '../../types/model';
 import { Frame, reader } from '../frames';
 import { datePartLabel } from '../dates';
-import { ChartContext, ChartFormat, ChartSpec, Tip, formatCompact, formatFull, keyOf, keyReader, legendOf, reducer, valueOf } from '../charts';
+import { ChartContext, ChartFormat, ChartSpec, Tip, formatCompact, formatFull, keyOf, keyReader, legendOf, reducer, valueOf, ordered } from '../charts';
 import { Area, PAD, SMALL, TICK, TINY, esc, labelSvg, layoutLabel, measurer, num, pt, seriesColor, sideTitle, axesSvg, textAt, tickLabels, valueAxis } from './svg';
+import { getOr, numberOf } from '../data';
 
 /** Points kept per series: at most one in each CELL×CELL pixel cell (a dot is DOT px wide, so a point left out is under one that is drawn). */
 const CELL = 3;
@@ -21,8 +22,6 @@ const DOT = 7;
 const MAX_SERIES = 20;
 /** Data labels (the detail's names) are drawn only when this few points are shown. */
 const MAX_LABELS = 60;
-const toNum = (v: unknown) => (typeof v === 'number' ? v : v == null || v === '' ? NaN : Number(v));
-
 /** The points: x and y values, each one's series, and (with details) its name. */
 export interface ScatterPoints {
   n: number;
@@ -48,24 +47,28 @@ export function scatterPoints(el: ChartElement, frame: Frame, ctx: ChartContext 
     if (!ser) return 0;
     let g = String(ser(k) ?? '—');
     if (!seriesIndex.has(g) && seriesNames.length >= MAX_SERIES - 1) g = 'Other';
-    let i = seriesIndex.get(g);
-    if (i === undefined) seriesIndex.set(g, (i = seriesNames.push(g) - 1));
-    return i;
+    return getOr(seriesIndex, g, () => seriesNames.push(g) - 1);
   };
-  // the legend's names as shown (none without a legend field)
-  const named = () => seriesNames.map(s => datePartLabel(s, el.dateParts?.group));
-
+  // the legend in the order other charts use (dates oldest first, a sort-by column's order, else as first seen; "Other"
+  // last), its points renumbered to match; its names as shown (none without a legend field)
+  const named = (series: Uint16Array, n: number) => {
+    const keys = ordered(seriesNames.filter((s) => s !== 'Other'), ctx.groupDate, group && !el.dateParts?.group ? ctx.order?.(group) : undefined);
+    if (seriesNames.includes('Other')) keys.push('Other');
+    const to = seriesNames.map((s) => keys.indexOf(s));
+    for (let i = 0; i < n; i++) series[i] = to[series[i]];
+    return keys.map((s) => datePartLabel(s, el.dateParts?.group));
+  };
   if (!detail && !xm && !ym) {
     const rx = reader(frame, x), ry = reader(frame, y);
     if (!rx || !ry) return null;
     const xs = new Float64Array(frame.length), ys = new Float64Array(frame.length), series = new Uint16Array(frame.length);
     let n = 0;
     for (let k = 0; k < frame.length; k++) {
-      const a = toNum(rx(k)), b = toNum(ry(k));
+      const a = numberOf(rx(k)), b = numberOf(ry(k));
       if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
       (xs[n] = a), (ys[n] = b), (series[n] = seriesOf(k)), n++;
     }
-    return { n, xs, ys, series, names: null, seriesNames: named() };
+    return { n, xs, ys, series, names: null, seriesNames: named(series, n) };
   }
 
   // summarized: the rows of each (detail, legend) pair, then x and y over them
@@ -74,10 +77,7 @@ export function scatterPoints(el: ChartElement, frame: Frame, ctx: ChartContext 
   for (let k = 0; k < frame.length; k++) {
     const name = det ? String(det(k) ?? '—') : '';
     const s = seriesOf(k);
-    const key = `${s}\u0000${name}`;
-    let c = cells.get(key);
-    if (!c) cells.set(key, (c = { name, s, pos: [] }));
-    c.pos.push(k);
+    getOr(cells, `${s}\u0000${name}`, () => ({ name, s, pos: [] })).pos.push(k);
   }
   const fx = reducer(frame, xm?.fn ?? x, el.xSummary?.aggregate || 'sum');
   const fy = reducer(frame, ym?.fn ?? y, el.summary?.aggregate || 'sum');
@@ -89,7 +89,7 @@ export function scatterPoints(el: ChartElement, frame: Frame, ctx: ChartContext 
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
     (xs[n] = a), (ys[n] = b), (series[n] = c.s), names.push(datePartLabel(c.name, el.dateParts?.detail)), n++;
   }
-  return { n, xs, ys, series, names: detail ? names : null, seriesNames: named() };
+  return { n, xs, ys, series, names: detail ? names : null, seriesNames: named(series, n) };
 }
 
 /** What the last drawing put where: the plot box and, per grid cell, the point drawn there (−1 for none). */
@@ -133,7 +133,7 @@ export function buildScatter(el: ChartElement, frame: Frame, ctx: ChartContext =
     const text = (raw: string, size: number, max = 4000) => layoutLabel(raw, m, size, max);
     // Laid out as Pele lays out an xychart's axes: titles outside the tick labels, ticks 4px long.
     const lineHeight = text('0', SMALL).height;
-    const xTitle = text(xName, SMALL, w * 0.8);
+    const xTitle = text(opt.xAxisLabel || xName, SMALL, w * 0.8);
     const yTitle = text(opt.yAxisLabel || yName, SMALL, h * 0.8);
     const labelled = opt.showValues && names ? text('0', TINY).height + 4 : lineHeight / 2;
     const top = PAD + labelled;

@@ -1,7 +1,6 @@
-import { clone } from '../runtime/data';
+import { clone, flipped } from '../runtime/data';
 import { Component, For, Index, JSX, Show, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
-import { chartKind } from '../runtime/charts';
 import { ChartType, DashElement, RefLine } from '../types/model';
 import { chartNames } from './widgets/ChartWidget';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
@@ -81,7 +80,7 @@ const share = (v: number) => `${Math.round(v * 100)}%`;
 
 export const FormatPane: Component = () => {
   const el = () => store.getSelectedElement() as any as DashElement & Record<string, any>;
-  const kind = () => (el().type === 'chart' ? chartKind(el().chartType) : null);
+  const kind = () => (el().type === 'chart' ? el().chartType : null);
   const is = (...types: ChartType[]) => !!kind() && types.includes(kind()!);
   const xy = () => is('bar', 'hbar', 'line', 'area', 'combo');
 
@@ -126,6 +125,7 @@ export const FormatPane: Component = () => {
       !is('scatter') && F.sw('Gridlines', 'options.gridlines', true)
     ], ['options.valueAxis', true]));
     add(xy(), sec('categoryAxis', 'Category axis', [F.text('Title', 'options.xAxisLabel', 'None')], ['options.categoryAxis', true]));
+    add(is('scatter'), sec('xAxis', 'X axis', [F.text('Title', 'options.xAxisLabel', 'The value’s name')]));
     add(is('radar', 'gauge'), sec('scale', 'Scale', [F.num(is('radar') ? 'Center' : 'Minimum', 'options.min', '0'), F.num(is('radar') ? 'Rim' : 'Target', 'options.max')]));
     add(t === 'chart' && !is('sankey', 'gauge'), sec('legend', 'Legend', [F.seg('Position', 'options.legendPosition', [[undefined, 'Bottom'], ['top', 'Top'], ['right', 'Right'], ['left', 'Left']])], ['options.showLegend', true]));
     add(t === 'chart' && !is('sankey'), sec('colors', 'Colors', [is('bar', 'hbar') && F.sw('Color per bar', 'options.varyColors'), { kind: 'custom', label: 'Colors', keys: ['options.colors'], render: colorList }]));
@@ -168,15 +168,15 @@ export const FormatPane: Component = () => {
   const copy = () => {
     const keys = FORMAT_KEYS[el().type] ?? [];
     const format = Object.fromEntries(keys.map(k => [k, el()[k] === undefined ? undefined : clone(el()[k])]));
-    // a chart's title text and its data choices (sort, top N) stay with it
-    if (format.options) format.options = { ...format.options, title: undefined, sort: undefined, topN: undefined };
+    // a chart's data choices (sort, top N) stay with it
+    if (format.options) format.options = { ...format.options, sort: undefined, topN: undefined };
     setCopied({ type: el().type, format });
   };
   const paste = () => {
     const c = copied();
     if (!c || c.type !== el().type) return;
     const format = { ...c.format };
-    if (format.options) format.options = { ...format.options, title: el().options?.title, sort: el().options?.sort, topN: el().options?.topN };
+    if (format.options) format.options = { ...format.options, sort: el().options?.sort, topN: el().options?.topN };
     store.updateElement(store.activePageId(), el().id, clone(format) as any);
   };
 
@@ -270,7 +270,7 @@ export const SettingsPane: Component<{ sections: Section[]; get: (path: string) 
       return fields.length ? [{ ...s, fields }] : [];
     });
   const isOpen = (s: Section) => !!q() || opened().has(s.id);
-  const flip = (s: Section) => setOpened(o => (o.has(s.id) ? (o.delete(s.id), new Set(o)) : new Set(o.add(s.id))));
+  const flip = (s: Section) => setOpened((o) => flipped(o, s.id));
 
   // --- controls ---
   const control = (f: Field): JSX.Element => {

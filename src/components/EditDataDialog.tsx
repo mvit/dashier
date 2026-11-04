@@ -1,12 +1,13 @@
 import { Component, For, JSX, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
-import { Seg } from './ui';
+import { Seg, Err, blurOnEnter } from './ui';
 import { DashRelationship, FieldType, isNumericType } from '../types/model';
 import { DataGrid } from './DataGrid';
 import { frameRows } from '../runtime/frames';
 import { fieldStats } from '../runtime/charts';
 import { payloadSize } from '../runtime/payloads';
+import { plural } from '../runtime/data';
 
 type Tab = 'data' | 'relationships';
 
@@ -159,7 +160,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
   };
 
   return (
-    <Modal class={`d-editdata ${tab() === 'data' ? 'd-editdata-tall' : ''}`} onClose={props.onClose}>
+    <Modal class={`d-editdata ${tab() === 'data' ? 'd-editdata-tall' : ''}`} onClose={props.onClose} ok="Done" onOk={props.onClose}>
       <div class="modal-header">
         <div class="d-editdata-title">
           <span class="d-editdata-icon">▦</span>
@@ -170,7 +171,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
               title="Rename table"
               spellcheck={false}
               onChange={(e) => rename(e.currentTarget)}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              onKeyDown={blurOnEnter}
             />
             <div class="d-editdata-meta">
               {frame().length.toLocaleString()} rows · {src()?.structure.length ?? 0} columns ·{' '}
@@ -183,7 +184,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
               <Show when={usedBy() && unused().length}>
                 {' · '}
                 <span class="d-uses none" title={`Nothing uses:\n${unused().join('\n')}`}>
-                  {unused().length} column{unused().length > 1 ? 's' : ''} unused
+                  {plural(unused().length, 'column')} unused
                 </span>
               </Show>
             </div>
@@ -198,10 +199,7 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
 
       <Seg class="d-dialog-seg" value={tab()} options={[['data', 'Data'], ['relationships', <>Relationships <span class="d-seg-count">{rels().length}</span></>]]} set={setTab} />
 
-      <Show when={error()}>
-        <div class="d-form-error d-editdata-error">{error()}</div>
-      </Show>
-
+      <Err text={error()} class="d-editdata-error" />
       <Show when={src()}>
         <Show when={tab() === 'data'}>
           <div class="d-editdata-hint">
@@ -295,11 +293,6 @@ export const EditDataDialog: Component<{ id: string; onClose: () => void; onRepl
           </div>
         </Show>
 
-      </Show>
-
-      <div class="modal-footer">
-        <button class="btn-primary" onClick={props.onClose}>Done</button>
-      </div>
-    </Modal>
+      </Show>    </Modal>
   );
 };

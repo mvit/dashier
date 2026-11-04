@@ -3,12 +3,31 @@
  * with each value summarized at every crossing, for every row group (its subtotal) and overall (the totals).
  * Groups hold frame positions, never row copies.
  */
-import { Compare, MatrixElement, MatrixField, MatrixValue } from '../types/model';
-import { Frame, reader, subset } from './frames';
+import { ChartElement, Compare, MatrixElement, MatrixField, MatrixValue } from '../types/model';
+import { Frame, reader } from './frames';
 import { datePartLabel, shiftKey } from './dates';
-import { compareText } from './data';
-import { buckets, comparison, keyIndex, keyOf, numberOf, pct, summarizeValue } from './charts';
+import { compareText, getOr, numberOf } from './data';
+import { along, buckets, comparison, keyIndex, keyOf, pct, run, valueOver } from './charts';
 import type { MeasureFn } from './measures';
+
+/**
+ * A chart's numbers as a matrix, under the chart's own filters (same id): its categories down (a scatter's details),
+ * its series across, its value (and a combo's line, a scatter's x) summarized as the chart summarizes them.
+ */
+export function chartMatrix(el: ChartElement): MatrixElement {
+  const { x, y, group, line, detail } = el.mapping ?? {}, parts = el.dateParts ?? {}, scatter = el.chartType === 'scatter';
+  const down = scatter ? detail && { field: detail, datePart: parts.detail } : x && { field: x, datePart: parts.x };
+  const value = (field: string | undefined, s: ChartElement['summary']) => (field ? [{ field, aggregate: s?.aggregate, showAs: s?.showAs, compare: s?.compare }] : []);
+  return {
+    id: el.id,
+    type: 'matrix',
+    sourceId: el.sourceId,
+    filters: el.filters,
+    rows: down ? [down] : [],
+    columns: group ? [{ field: group, datePart: parts.group }] : [],
+    values: [...(scatter ? value(x, el.xSummary) : []), ...value(y, el.summary), ...value(line, el.lineSummary)]
+  } as MatrixElement;
+}
 
 /** Column keys shown at most (the totals still count every column). */
 const MAX_COLUMNS = 100;
@@ -48,15 +67,8 @@ function keyTextReader(frame: Frame, f: MatrixField): (k: number) => string {
 
 type MeasureOf = (ref: string) => MeasureFn | null | undefined;
 
-/** A value over a group of positions of `frame`: a measure worked out on them, or its field summarized. */
-function summarize(frame: Frame, v: MatrixValue, measure: MeasureOf) {
-  const fn = measure(v.field);
-  if (fn) return (pos: ArrayLike<number>) => (pos.length ? fn(subset(frame, Int32Array.from(pos))) : null);
-  const read = reader(frame, v.field);
-  const method = v.aggregate ?? 'sum';
-  return (pos: ArrayLike<number>) => (!pos.length ? null : method === 'count' ? pos.length : read ? summarizeValue(pos.length, i => read(pos[i]), method) : null);
-}
-
+/** A value over a group of positions of `frame`. */
+const summarize = (frame: Frame, v: MatrixValue, measure: MeasureOf) => valueOver(frame, v.field, v.aggregate, measure(v.field));
 /** Summaries that add up: a group's is worked out from its subgroups' (see `adds` in buildMatrix). */
 const ADDS = ['sum', 'avg', 'count', 'min', 'max'];
 /** Most cells (finest groups × columns) worked out to add up; past this, every group reads its own rows. */
@@ -106,7 +118,7 @@ export function buildMatrix(
     const at = new Map<string, number[]>();
     for (let k = 0; k < o.frame.length; k++) {
       if (!ours.every((set, i) => !set || set.has(reads[i](k)))) continue;
-      const add = (key: string) => (at.get(key) ?? at.set(key, []).get(key)!).push(k);
+      const add = (key: string) => getOr(at, key, () => []).push(k);
       const cols = colFields.length ? [ck.map(r => r(k)).join('\u0000'), '*'] : [''];
       let path = '';
       for (let d = 0; d <= rk.length; d++) {
@@ -117,8 +129,9 @@ export function buildMatrix(
     const fn = summarize(o.frame, v, o.measure);
     return (path: string, col: string) => fn(at.get(path + '\u0001' + col) ?? []);
   });
-  // running totals add up along the columns, or down each group's rows when there are none
-  const runs = values.flatMap((v, i) => (v.showAs === 'running-total' ? [i] : []));
+  // a value shown along an axis (running, year to date, a rolling average) runs along the columns, or down each
+  // group's rows when there are none
+  const runs = values.flatMap((v, i) => (along(v.showAs) ? [i] : []));
 
   // columns: every combination of the column fields' keys, in order, level by level
   const colOf = new Int32Array(frame.length);
@@ -132,10 +145,7 @@ export function buildMatrix(
     const raw = new Int32Array(frame.length);
     const index = new Map<number, number>();
     for (let k = 0; k < frame.length; k++) {
-      const key = idx.reduce((a, x) => a * x.names.length + x.at[k], 0);
-      let i = index.get(key);
-      if (i === undefined) index.set(key, (i = keys.push(idx.map(x => x.names[x.at[k]])) - 1));
-      raw[k] = i;
+      raw[k] = getOr(index, idx.reduce((a, x) => a * x.names.length + x.at[k], 0), () => keys.push(idx.map(x => x.names[x.at[k]])) - 1);
     }
     const sorted = keys.map((_, i) => i).sort((a, b) => {
       for (let l = 0; l < colFields.length; l++) {
@@ -170,10 +180,8 @@ export function buildMatrix(
     const id = new Int32Array(n), key: number[] = [], seen = new Map<number, number>();
     kids.push(keyAt[d - 1].map(() => []));
     for (let k = 0; k < n; k++) {
-      const up = ids[d - 1][k], code = up * names.length + at[k];
-      let g = seen.get(code);
-      if (g === undefined) seen.set(code, (g = key.push(at[k]) - 1)), kids[d - 1][up].push(g);
-      id[k] = g;
+      const up = ids[d - 1][k];
+      id[k] = getOr(seen, up * names.length + at[k], () => (kids[d - 1][up].push(key.length), key.push(at[k]) - 1));
     }
     ids.push(id), keyAt.push(key);
   });
@@ -242,7 +250,7 @@ export function buildMatrix(
     else {
       for (let c = 0; c < cols; c++) put(c, c, () => inCol(c), shown[c].join('\u0000'));
       if (totalCol) put(cols, -1, rows, '*');
-      for (const i of runs) for (let c = 1; c < cols; c++) out[c * nv + i] = Number(out[(c - 1) * nv + i] ?? 0) + Number(out[c * nv + i] ?? 0);
+      for (const i of runs) run(Array.from({ length: cols }, (_, c) => Number(out[c * nv + i] ?? 0)), values[i].showAs, shown.map((k) => k.at(-1)!)).forEach((x, c) => (out[c * nv + i] = x));
     }
     return out;
   };
@@ -256,7 +264,7 @@ export function buildMatrix(
         const children = d < last ? toRows(d + 1, kids[d][g], path) : [];
         return { path, key, label: keyLabel(key, rowFields[d]), depth: d, children, cells: cellsOf(leavesOf(d, g), () => rowsOf(d, g), path) };
       });
-    if (!colFields.length) for (const i of runs) rows.forEach((r, k) => k && (r.cells[i] = Number(rows[k - 1].cells[i] ?? 0) + Number(r.cells[i] ?? 0)));
+    if (!colFields.length) for (const i of runs) run(rows.map((r) => Number(r.cells[i] ?? 0)), values[i].showAs, rows.map((r) => r.key)).forEach((x, k) => (rows[k].cells[i] = x));
     return rows;
   };
 

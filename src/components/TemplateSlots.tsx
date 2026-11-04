@@ -7,6 +7,7 @@ import { summaryLabel } from '../runtime/charts';
 import { isMeasureRef, measureName } from '../runtime/measures';
 import { DataBinding } from '../types/model';
 import { FieldWell, MenuSection, WellItem, compareSections, formatSection, summarizeSection, unitsSection } from './FieldWell';
+import { Err } from './ui';
 
 /** A new binding for a dropped field: numbers are summed, other fields counted; a whole table is counted (its menu switches to all rows, for {{#name}} lists). */
 export function bindingFor({ table, field }: DroppedField): DataBinding {
@@ -81,9 +82,7 @@ export const TemplateSlots: Component<{ element: any; set: (prop: string, val: a
           }}
         </For>
       </Show>
-      <Show when={parsed().error}>
-        <div class="d-form-error">{parsed().error}</div>
-      </Show>
+      <Err text={parsed().error} />
     </div>
   );
 };

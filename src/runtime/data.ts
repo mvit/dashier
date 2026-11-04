@@ -12,7 +12,7 @@ export function filterTest(f: DashFilter): (v: unknown) => boolean {
   return (v) => {
     if (values && !values.has(text(f.datePart ? datePartKey(String(v ?? ''), f.datePart) : v))) return false;
     if (f.min != null || f.max != null) {
-      const n = typeof v === 'number' ? v : v == null || !String(v).trim() ? NaN : Number(v); // a blank isn't 0
+      const n = numberOf(v); // a blank isn't 0
       if (!(n >= (f.min ?? -Infinity) && n <= (f.max ?? Infinity))) return false;
     }
     return !range || inRange(String(v ?? ''), range.from, range.to);
@@ -37,18 +37,27 @@ export const shiftFilters = (own: DashFilter[] = [], by: Shift, isDate: (f: Dash
  */
 export function pickSummary(f: Partial<DashFilter> = {}, label: (v: string) => string, of: () => number): string {
   const { last, from, to, min, max, values: s = [] } = f;
-  if (last) return `Last ${last.n} ${last.unit}${last.n > 1 ? 's' : ''}`;
+  if (last) return `Last ${plural(last.n, last.unit)}`;
   if (from || to) return from && to ? `${from} – ${to}` : from ? `from ${from}` : `to ${to}`;
   if (min != null || max != null) return min != null && max != null ? `${min} – ${max}` : min != null ? `≥ ${min}` : `≤ ${max}`;
   return s.length ? (s.length < 3 ? `is ${s.map(label).join(', ')}` : `${s.length} of ${of()}`) : '';
 }
 
 /** `own` filters with `by` in place of those on the same fields (a comparison's other period, say). */
+/** `map`'s entry for `key`, made by `make` the first time. */
+export const getOr = <K, V>(map: Map<K, V>, key: K, make: () => V): V => (map.has(key) || map.set(key, make()), map.get(key)!);
+
 export const replaceFilters = (own: DashFilter[] = [], by: DashFilter[] = []) =>
-  [...own.filter(f => !by.some(g => g.field === f.field && (g.table ?? '') === (f.table ?? ''))), ...by];
+  [...own.filter(f => !by.some(g => g.field === f.field && g.table === f.table)), ...by];
 
 /** Text that is wholly a number ("-1.5", "1e3"; not "1,234", "0x1A" or "Infinity"). */
 export const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
+/** Text that is a number: not a code with a leading zero ("02134"). */
+export const isNumberText = (s: string) => NUMBER.test(s) && !/^[-+]?0\d/.test(s);
+/** Nothing in the cell: null, empty or only spaces (which Number() would read as 0). */
+export const blankCell = (v: unknown) => v == null || (typeof v === 'string' && !v.trim());
+/** A cell as a number: NaN for a blank or anything that isn't one. */
+export const numberOf = (v: unknown) => (typeof v === 'number' ? v : blankCell(v) ? NaN : Number(v));
 
 /**
  * A value as relationship keys compare it, as Power BI does: numbers by value ("2024.0" is 2024; a code with a
@@ -57,7 +66,7 @@ export const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
 export const keyText = (v: unknown): string => {
   if (typeof v === 'number') return String(v);
   const s = String(v ?? '').trim();
-  return NUMBER.test(s) && !/^[-+]?0\d/.test(s) ? String(+s) : s.replace(/[T ]00:00(:00)?$/, '').toLowerCase();
+  return isNumberText(s) ? String(+s) : s.replace(/[T ]00:00(:00)?$/, '').toLowerCase();
 };
 
 const collate = new Intl.Collator(undefined, { numeric: true }).compare;
@@ -66,6 +75,12 @@ export const compareText = (a: string, b: string) => (NUMBER.test(a) && NUMBER.t
 
 /** A deep copy of plain data (a store's, whose proxies structuredClone can't copy). */
 export const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+/** "1 visual", "3 visuals". */
+export const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
+/** A copy of `s` with `v` added, or taken out if it was there. */
+export const flipped = <T,>(s: Set<T>, v: T) => ((s = new Set(s)), s.delete(v) || s.add(v), s);
+/** `xs` with `v` added, or taken out if it was there. */
+export const toggled = <T,>(xs: T[], v: T) => (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]);
 
 /** No value: null, undefined or empty text. */
 export const isBlank = (v: unknown): boolean => v == null || v === '';

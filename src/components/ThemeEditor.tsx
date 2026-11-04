@@ -1,6 +1,7 @@
 import { Component, JSX } from 'solid-js';
 import { store } from '../runtime/store';
 import { resolveCanvas, resolveTheme } from '../types/model';
+import { CURRENCIES } from '../runtime/charts';
 import { F, Section, SettingsPane, px, sec } from './FormatPane';
 import { Select } from './ui';
 
@@ -51,12 +52,14 @@ export const ThemeEditor: Component = () => {
   const get = (path: string): any => {
     const [k, i] = path.split('.');
     if (k === 'canvas') return size().width === 1440 && size().height === 810 ? undefined : size();
+    if (k === 'currency') return store.doc.currency;
     const v = (store.doc.theme as any)?.[k];
     return i ? v?.[+i] : k === 'mode' && v === 'light' ? undefined : v;
   };
   const put = (path: string, v: any) => {
     const [k, i] = path.split('.');
     if (k === 'canvas') return store.setCanvas(resolveCanvas(v));
+    if (k === 'currency') return store.setReportCurrency(v ?? CURRENCIES[0]);
     if (!i) return store.setTheme({ [k]: v === '' || v === (k === 'radius' ? 0 : (base() as any)[k]) ? undefined : v });
     const palette = [...(store.doc.theme?.palette ?? base().palette)];
     palette[+i] = v ?? base().palette[+i];
@@ -91,7 +94,12 @@ export const ThemeEditor: Component = () => {
     // unset, a series has the color it's drawn in (a shorter palette repeats)
     sec('theme-series', 'Series colors', base().palette.map((_, i) => F.color(`Series ${i + 1}`, `palette.${i}`, () => store.reportTheme().palette[i % store.reportTheme().palette.length]))),
     sec('theme-font', 'Font and corners', [F.text('Font', 'font', 'System default', false, FONTS), F.range('Corners', 'radius', 0, 24, 1, 0, px)]),
-    sec('theme-page', 'Page size', pageRows())
+    sec('theme-page', 'Page size', pageRows()),
+    // the currency every "Currency" format is in
+    sec('theme-currency', 'Numbers', [F.select('Currency', 'currency', CURRENCIES.map((c): [string | undefined, string] => {
+      const sym = new Intl.NumberFormat('en-US', { style: 'currency', currency: c }).formatToParts(0).find((p) => p.type === 'currency')!.value;
+      return [c === CURRENCIES[0] ? undefined : c, sym === c ? c : `${c} (${sym})`];
+    }))])
   ];
 
   return (

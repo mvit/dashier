@@ -31,9 +31,12 @@ src = doc.get('sources') or {}
 rels = doc.get('relationships') or []
 measures = doc.get('measures') or []
 pages = doc.get('pages') or []
-AGG = {'sum', 'avg', 'count', 'distinct', 'min', 'max', 'median', 'mode', 'first', 'last', 'latest', 'stdev', 'var'}
+AGG = {'sum', 'avg', 'count', 'distinct', 'min', 'max', 'median', 'mode', 'first', 'last', 'stdev', 'var'}
 FMT = {'number', 'integer', 'currency', 'percent'}
 UNITS = {'auto', 'thousands', 'millions', 'billions'}
+CURRENCIES = {'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'AUD', 'CAD', 'CHF', 'HKD', 'SGD'}
+if doc.get('currency') and doc['currency'] not in CURRENCIES:
+    F(f'currency {doc["currency"]}: one of {sorted(CURRENCIES)} (others: format as number and name the unit)')
 CHARTS = {'bar', 'hbar', 'line', 'area', 'combo', 'scatter', 'pie', 'donut', 'radar', 'treemap', 'sankey', 'gauge'}
 
 # --- tables -------------------------------------------------------------------------------------------------
@@ -304,7 +307,7 @@ def check_value(where, d, axis=True):
     d = d or {}
     if d.get('units') and d['units'] not in UNITS:
         F(f'{where}: units is one of {sorted(UNITS)}')
-    if d.get('showAs') and d['showAs'] not in (('percent-of-total', 'running-total') if axis else ('percent-of-total',)):
+    if d.get('showAs') and d['showAs'] not in (('percent-of-total', 'running-total', 'ytd', 'moving-average') if axis else ('percent-of-total',)):
         F(f'{where}: showAs {d["showAs"]}')
     c = d.get('compare') or {}
     if c.get('shift') and c['shift'] not in ('period', 'year'):
@@ -350,6 +353,18 @@ def template_errors(c):
             open_.append(name)
     for n in open_:
         yield f'section {{{{#{n}}}}} is never closed'
+
+
+def outside_sections(c):
+    """A template's text outside its {{#…}} and {{^…}} sections (their opening tags kept): inside one, names are the rows' fields."""
+    out, depth, at = [], 0, 0
+    for m in re.finditer(r'\{\{\s*([#^/])[^}]*\}\}', c):
+        if depth == 0 and m.group(1) != '/':
+            out.append(c[at:m.end()])
+        depth = depth + 1 if m.group(1) in '#^' else max(depth - 1, 0)
+        if depth == 0:
+            at = m.end()
+    return ''.join(out) + (c[at:] if depth == 0 else '')
 
 
 def typed_numbers(text):
@@ -423,12 +438,12 @@ for p in pages:
             check_value(where, e, False)
             if cmp.get('field'):
                 refs.append(cmp['field'])
-            if re.search(r'\d', str(e.get('staticValue', ''))):
-                W(f'{where}: a typed staticValue ({e["staticValue"]}): make it a measure so it follows the data')
             if typed_numbers((e.get('subtitle') or '') + ' ' + (e.get('title') or '')):
                 W(f'{where}: a figure in the title or subtitle: if it comes from the data, it goes stale (bind it in a text box)')
         elif ty == 'table':
             refs = [c.get('field') for c in e.get('columns') or []]
+            if not refs:
+                F(f'{where}: a table shows its columns: list them')
             for c in e.get('columns') or []:
                 if 'label' not in c:
                     F(f'{where}: column {c.get("field")} needs a label')
@@ -476,8 +491,7 @@ for p in pages:
                     W(f'{where}: a $ typed before currency-formatted {v} shows twice')
                 if not bd.get('compare') and (bd.get('units') or mm.get('units')) and re.search(r'\{\{\s*' + re.escape(v) + r'\s*\}\}\s*[KMB]\b', c):
                     W(f'{where}: {v} already shows its display units (K, M, B); a typed one shows twice')
-            outer = re.sub(r'(\{\{[#^]\s*[\w.]+[^}]*\}\}).*?\{\{/\s*[\w.]+\s*\}\}', r'\1', c, flags=re.S)
-            for v in re.findall(r'\{\{\{?[#^&]?\s*([A-Za-z_]\w*)', outer):
+            for v in re.findall(r'\{\{\{?[#^&]?\s*([A-Za-z_]\w*)', outside_sections(c)):
                 if v not in b and v not in src and v not in ('title', 'page', 'rows'):
                     F(f'{where}: {{{{ {v} }}}} has no binding')
         else:

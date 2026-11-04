@@ -5,6 +5,7 @@ import { AggregationMethod, Compare, ShowAs, Units, ValueFormat } from '../types
 import { dismiss, menuArea } from './ContextMenu';
 import { SUMMARY_NAMES } from '../runtime/charts';
 import type { DatePart } from '../runtime/dates';
+import { Rename } from './ui';
 
 export interface MenuOption {
   label: string;
@@ -57,15 +58,22 @@ export const summarizeSection = (
     ? ['sum', 'avg', 'min', 'max', 'median', 'stdev', 'var', 'count', 'distinct', ...any]
     : ['count', 'distinct', ...(opts.values ? (['min', 'max'] as const) : []), ...any];
   // "latest", from older files, is "last"
-  return choices('Summarize', current === 'latest' ? 'last' : current, [...(opts.allowNone ? [undefined] : []), ...methods].map((m): [AggregationMethod | undefined, string] => [m, m ? SUMMARY_NAMES[m] : "Don't summarize"]), onPick);
+  return choices('Summarize', current, [...(opts.allowNone ? [undefined] : []), ...methods].map((m): [AggregationMethod | undefined, string] => [m, m ? SUMMARY_NAMES[m] : "Don't summarize"]), onPick);
 };
 
-/** Show value as: a share of the grand total, or (along an axis: charts, matrices) a running total. */
-export const showAsSection = (current: ShowAs | undefined, onPick: (s: ShowAs | undefined) => void, running = false) =>
-  choices('Show value as', current, [[undefined, 'No calculation'], ['percent-of-total', 'Percent of grand total'], ...(running ? [['running-total', 'Running total'] as [ShowAs, string]] : [])], onPick);
+/**
+ * Show value as: a share of the grand total, or (along an axis: charts, matrices) a running total or a rolling average,
+ * and along dates the year to date.
+ */
+export const showAsSection = (current: ShowAs | undefined, onPick: (s: ShowAs | undefined) => void, running = false, dates = false) =>
+  choices('Show value as', current, [
+    [undefined, 'No calculation'],
+    ['percent-of-total', 'Percent of grand total'],
+    ...((running ? [['running-total', 'Running total'], ...(dates ? [['ytd', 'Year to date']] : []), ['moving-average', 'Rolling average (3 periods)']] : []) as [ShowAs, string][])
+  ], onPick);
 
 /** Number formats and display units, as every menu, dialog and pane offers them (unset first). */
-export const FORMAT_CHOICES: [ValueFormat | undefined, string][] = [[undefined, 'Automatic'], ['number', 'Number (1.2K)'], ['integer', 'Whole number (1,234)'], ['currency', 'Currency ($)'], ['percent', 'Percent (%)']];
+export const FORMAT_CHOICES: [ValueFormat | undefined, string][] = [[undefined, 'Automatic'], ['number', 'Number (1.2K)'], ['integer', 'Whole number (1,234)'], ['currency', 'Currency'], ['percent', 'Percent (%)']];
 export const UNIT_CHOICES: [Units | undefined, string][] = [[undefined, 'None'], ['auto', 'Auto (K, M, B)'], ['thousands', 'Thousands (K)'], ['millions', 'Millions (M)'], ['billions', 'Billions (B)']];
 
 /** Display units: amounts in thousands, millions or billions ($416.16B). */
@@ -127,7 +135,6 @@ const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () =>
   return (
     <Portal mount={props.anchor.closest('.ed-root')!}>
       <div class="d-field-menu" ref={menu} style={{ left: `${pos().left}px`, top: `${pos().top}px`, 'min-width': `${pos().width}px`, 'max-height': `${area.bottom - area.top}px` }}>
-        <button class="d-menu-item" onClick={pick(props.item.onRemove)}>Remove field</button>
         <Show when={props.item.onRename}>
           <button class="d-menu-item" onClick={pick(props.onRename)}>Rename for this visual</button>
         </Show>
@@ -215,25 +222,16 @@ const Pill: Component<{ item: WellItem; well: symbol; index: number; onMove?: (f
   const [open, setOpen] = createSignal(false);
   const [renaming, setRenaming] = createSignal(false);
 
-  const commit = (value: string) => {
+  const commit = (value?: string) => {
     setRenaming(false);
-    if (value.trim() && value !== props.item.renameValue) props.item.onRename?.(value.trim());
+    if (value?.trim() && value !== props.item.renameValue) props.item.onRename?.(value.trim());
   };
 
   return (
     <Show
       when={!renaming()}
       fallback={
-        <input
-          class="d-pill-rename"
-          value={props.item.renameValue ?? props.item.label}
-          ref={(el) => setTimeout(() => el.select())}
-          onBlur={(e) => commit(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commit(e.currentTarget.value);
-            if (e.key === 'Escape') setRenaming(false);
-          }}
-        />
+        <Rename class="d-pill-rename" value={props.item.renameValue ?? props.item.label} done={commit} />
       }
     >
       <div

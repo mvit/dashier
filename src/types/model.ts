@@ -80,7 +80,7 @@ export function resolveCanvas(c?: Partial<DashCanvas>): DashCanvas {
 /** Categorical filter keeps rows whose `field` is in `values`; numeric filter keeps min <= field <= max. */
 export interface DashFilter {
   field: string;
-  /** The table `field` belongs to. It also filters the tables that look it up; without one, the first table with the field. */
+  /** The table `field` belongs to (a filter without one applies nowhere). It also filters the tables that look it up. */
   table?: string;
   values?: string[];
   min?: number;
@@ -123,13 +123,14 @@ export type WidgetType = 'chart' | 'table' | 'matrix' | 'card' | 'markdown' | 's
  * min, max, mode, first and last also read text (alphabetically) and dates (earliest/latest) where a single value
  * is shown: cards, text box variables, table columns, matrix values.
  */
-export type AggregationMethod = 'sum' | 'avg' | 'count' | 'distinct' | 'min' | 'max' | 'median' | 'mode' | 'first' | 'last' | 'latest' | 'stdev' | 'var';
+export type AggregationMethod = 'sum' | 'avg' | 'count' | 'distinct' | 'min' | 'max' | 'median' | 'mode' | 'first' | 'last' | 'stdev' | 'var';
 
 /**
  * "Show value as": each value as a share of the visual's grand total, or added up along the way (a running total:
  * along a chart's axis, a matrix's columns, else its rows).
  */
-export type ShowAs = 'percent-of-total' | 'running-total';
+/** A value as a share of its grand total, or along an axis: added up, added up within each year, or averaged over the last three points. */
+export type ShowAs = 'percent-of-total' | 'running-total' | 'ytd' | 'moving-average';
 
 /** Display units: a value divided and suffixed ($416.16B); `auto` picks the largest unit the value reaches. */
 export type Units = 'auto' | 'thousands' | 'millions' | 'billions';
@@ -181,7 +182,6 @@ export interface CardElement extends BaseElement {
   };
   format?: ValueFormat;
   units?: Units;
-  staticValue?: string | number;
   subtitle?: string;
   /** The big number: size in px (default fits the tile), color, alignment. */
   callout?: { size?: number; color?: string; align?: 'left' | 'center' };
@@ -248,7 +248,6 @@ export interface ChartMapping {
 }
 
 export interface ChartOptions {
-  title?: string;
   showLegend?: boolean;
   /** Where the legend sits; default bottom. */
   legendPosition?: 'bottom' | 'top' | 'right' | 'left';
@@ -307,8 +306,8 @@ export interface ChartElement extends BaseElement {
 
 export interface TableColumn {
   field: string;
-  label: string;
-  align?: 'left' | 'right' | 'center';
+  /** Its header, when renamed. */
+  label?: string;
   format?: 'currency' | 'number' | 'integer' | 'date' | 'percent' | 'string';
   units?: Units;
   /** Summarizes this column; the table then shows one row per combination of its unsummarized columns. */
@@ -436,6 +435,8 @@ export interface DashDocument {
   theme?: DashTheme;
   /** Fixed report page size; default 1440×810. */
   canvas?: DashCanvas;
+  /** The currency of every "currency" format (an ISO code, one of CURRENCIES in charts.ts); default USD. */
+  currency?: string;
   sources: Record<string, DashDataSource>;
   pages: DashPage[];
   /** Filters applied on every page. */

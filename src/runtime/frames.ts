@@ -6,7 +6,7 @@
  */
 import { DashFilter } from '../types/model';
 import { Column, ColumnTable, cellReader, columnsFromRows } from './columns';
-import { filterTest, isBlank, keyText } from './data';
+import { filterTest, isBlank, keyText, getOr } from './data';
 import { inferStructure } from './hydrate';
 
 type Row = Record<string, unknown>;
@@ -72,27 +72,41 @@ export function codesOf(f: Frame, field: string): { words: string[]; code: (k: n
   return { words, code: ids ? k => (ids[k] < 0 ? -1 : codes[ids[k]]) : k => codes[k] };
 }
 
-/** Rows passing every filter. Filters on fields the frame doesn't have are ignored. */
-export function filterFrame(f: Frame, filters: DashFilter[]): Frame {
-  const tests = filters.flatMap(flt => {
-    const test = filterTest(flt), d = codesOf(f, flt.field);
-    if (d) {
-      // a dictionary column is tested once per word
-      const pass = d.words.map(test), none = test(null);
-      return [(k: number) => { const c = d.code(k); return c < 0 ? none : pass[c]; }];
-    }
-    const read = reader(f, flt.field);
-    return read ? [(k: number) => test(read(k))] : [];
-  });
-  if (!tests.length) return f;
+/**
+ * `fn` of each row's value of `field`, by position (null when the frame has no such field). A dictionary column's
+ * (dates, repeated text) is worked out once per word, when first met, so first-seen order holds.
+ */
+export function perCell<T>(f: Frame, field: string, fn: (v: unknown) => T): ((k: number) => T) | null {
+  const d = codesOf(f, field), read = reader(f, field);
+  if (!d) return read && ((k) => fn(read(k)));
+  const memo: T[] = [], seen = new Uint8Array(d.words.length + 1);
+  return (k) => {
+    const c = d.code(k) + 1;
+    return seen[c] ? memo[c] : ((seen[c] = 1), (memo[c] = fn(c ? d.words[c - 1] : null)));
+  };
+}
+
+/** Which rows of `f` pass a filter: 1 or 0 at each position (null: its field isn't one `f` reads, so it doesn't apply). */
+export function filterMask(f: Frame, flt: DashFilter): Uint8Array | null {
+  const pass = perCell(f, flt.field, filterTest(flt)), out = new Uint8Array(f.length);
+  if (!pass) return null;
+  for (let k = 0; k < f.length; k++) out[k] = +pass(k);
+  return out;
+}
+
+/** The rows that pass every mask (the frame itself when they all do). */
+export function maskFrame(f: Frame, masks: Uint8Array[]): Frame {
+  if (!masks.length) return f;
   const keep = new Int32Array(f.length);
   let n = 0;
   outer: for (let k = 0; k < f.length; k++) {
-    for (const t of tests) if (!t(k)) continue outer;
+    for (const m of masks) if (!m[k]) continue outer;
     keep[n++] = k;
   }
   return n === f.length ? f : subset(f, keep.slice(0, n));
 }
+
+export const filterFrame = (f: Frame, filters: DashFilter[]): Frame => maskFrame(f, filters.flatMap((x) => filterMask(f, x) ?? []));
 
 /** Every field the frame can read: its table's columns, then "table.field" for joined tables. */
 export const frameFields = (f: Frame) => [...f.base.table.names, ...Object.entries(f.joined).flatMap(([t, p]) => p.table.names.map(n => `${t}.${n}`))];
@@ -113,21 +127,15 @@ export function frameRows(f: Frame, start = 0, end = f.length): Row[] {
  */
 export function joinFrame(left: Frame, leftKey: string, right: ColumnTable, rightKey: string, name: string, lookup = false): Frame {
   const rk = right.columns[rightKey] && cellReader(right.columns[rightKey]);
-  const lk = reader(left, leftKey);
   const byKey = new Map<string, number[]>();
   if (rk)
     for (let r = 0; r < right.length; r++) {
       const v = rk(r);
       if (v == null || v === '') continue;
-      const key = keyText(v);
-      const list = byKey.get(key);
-      list ? list.push(r) : byKey.set(key, [r]);
+      getOr(byKey, keyText(v), () => []).push(r);
     }
   const hitsOf = (v: unknown) => (v == null || v === '' ? undefined : byKey.get(keyText(v))) ?? NONE;
-  // a dictionary key column is looked up once per word
-  const d = codesOf(left, leftKey);
-  const per = d?.words.map(hitsOf);
-  const hitsAt = (k: number) => (d ? (d.code(k) < 0 ? NONE : per![d.code(k)]) : hitsOf(lk?.(k)));
+  const hitsAt = perCell(left, leftKey, hitsOf) ?? (() => NONE);
   let out: Frame;
   const outR: number[] = [];
   if (lookup) {
@@ -137,8 +145,7 @@ export function joinFrame(left: Frame, leftKey: string, right: ColumnTable, righ
   } else {
     const outL: number[] = [];
     for (let k = 0; k < left.length; k++) for (const r of hitsAt(k)) outL.push(k), outR.push(r);
-    const at = Int32Array.from(outL);
-    out = mapParts(left, at.length, p => ({ table: p.table, ids: p.ids ? at.map(k => p.ids![k]) : at }));
+    out = subset(left, Int32Array.from(outL));
   }
   out.joined[name] = { table: right, ids: Int32Array.from(outR) };
   return out;

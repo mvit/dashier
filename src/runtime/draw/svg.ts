@@ -4,6 +4,7 @@
  * laying anything out, and a chart is one SVG string, inserted once. Unlike Pele, a chart is drawn at exactly
  * its tile's size, and Dashier draws the legends and titles (in HTML), so neither is here.
  */
+import { getOr } from '../data';
 
 /** Where a chart is drawn: the tile's size in px, and the report's font (for measuring text). */
 export interface Area {
@@ -107,8 +108,7 @@ export function measurer(font = 'sans-serif'): Measurer {
   m = {
     width(text, size, bold) {
       const key = (bold ? 'bold ' : '') + size + 'px ' + font;
-      let cache = caches.get(key);
-      if (!cache) caches.set(key, (cache = new Map()));
+      const cache = getOr(caches, key, () => new Map<string, number>());
       let w = cache.get(text);
       if (w === undefined) {
         if (key !== current) ctx.font = current = key;

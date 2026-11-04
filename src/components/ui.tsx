@@ -1,4 +1,5 @@
-import { For, JSX, Show } from 'solid-js';
+import { For, JSX, Show, createSignal } from 'solid-js';
+import { ClearButton } from './icons';
 
 /**
  * The editor's shared controls, styled by the chrome's tokens (theme.css): what a pane, a dialog or a slicer
@@ -43,6 +44,49 @@ export const Card = (p: {
   </section>
 );
 
+/**
+ * A filter's or slicer's card: its field (`sub`: the table, small), what it keeps (`summary`: empty when it keeps
+ * everything), and while it keeps less, a button to `clear` it ([its tooltip, what it does]). More `actions` follow.
+ */
+export const PickCard = (p: {
+  class?: string;
+  open: boolean;
+  flip: () => void;
+  name: JSX.Element;
+  sub?: string;
+  summary: string;
+  clear: [string, () => void];
+  actions?: JSX.Element;
+  children: JSX.Element;
+}) => (
+  <Card
+    class={`d-filter-card ${p.summary ? 'active' : ''} ${p.class ?? ''}`}
+    open={p.open}
+    flip={p.flip}
+    title={
+      <>
+        <span class="filter-name">
+          {p.name}
+          <Show when={p.sub}>
+            <small>{p.sub}</small>
+          </Show>
+        </span>
+        <span class="filter-type">{p.summary}</span>
+      </>
+    }
+    actions={
+      <>
+        <Show when={p.summary}>
+          <ClearButton class="d-filter-x" title={p.clear[0]} onClick={p.clear[1]} />
+        </Show>
+        {p.actions}
+      </>
+    }
+  >
+    {p.children}
+  </Card>
+);
+
 /** A <select> of `[value, label]` choices, `value`'s selected; an option's value is its own as text (unset: ''). */
 export const Select = (p: { class?: string; title?: string; value: unknown; options: [unknown, string][]; set: (v: any) => void }) => {
   const text = (v: unknown) => String(v ?? '');
@@ -73,6 +117,66 @@ export const Check = (p: { checked: boolean; set: () => void; radio?: boolean; c
     <input type={p.radio ? 'radio' : 'checkbox'} checked={p.checked} onClick={(e) => (p.set(), (e.currentTarget.checked = p.checked))} />
     {p.children}
   </label>
+);
+
+/**
+ * The checklist a filter, a slicer and a measure's condition pick values from: `on` says which are picked, `flip` picks or
+ * drops one. A search box shows once there are more than `search` values; the first `limit` matches are listed (500).
+ * `children` come first (a filter's Select All).
+ */
+export const CheckList = (p: {
+  class: string;
+  values: string[];
+  label?: (v: string) => string;
+  on: (v: string) => boolean;
+  flip: (v: string) => void;
+  radio?: boolean;
+  search?: number;
+  limit?: number;
+  children?: JSX.Element;
+}) => {
+  const [q, setQ] = createSignal('');
+  const label = (v: string) => p.label?.(v) ?? v;
+  const shown = () => (q() ? p.values.filter((v) => label(v).toLowerCase().includes(q().toLowerCase())) : p.values).slice(0, p.limit ?? 500);
+  return (
+    <>
+      <Show when={p.values.length > (p.search ?? Infinity)}>
+        <Search class="d-input d-slicer-search" value={q()} set={setQ} />
+      </Show>
+      <div class={p.class}>
+        {p.children}
+        <For each={shown()}>
+          {(v) => (
+            <Check radio={p.radio} checked={p.on(v)} set={() => p.flip(v)}>
+              {label(v)}
+            </Check>
+          )}
+        </For>
+      </div>
+    </>
+  );
+};
+
+/** A name edited in place: selected to start, saved on Enter or when it loses focus; Esc calls `done()` with nothing. */
+export const Rename = (p: { class: string; value: string; done: (v?: string) => void }) => (
+  <input
+    type="text"
+    class={p.class}
+    value={p.value}
+    ref={(el) => setTimeout(() => el.select())}
+    onBlur={(e) => p.done(e.currentTarget.value)}
+    onKeyDown={(e) => (e.key === 'Enter' ? p.done(e.currentTarget.value) : e.key === 'Escape' && p.done())}
+  />
+);
+
+/** Enter in a text field is done with it: saved as it loses focus. */
+export const blurOnEnter = (e: KeyboardEvent & { currentTarget: HTMLElement }) => e.key === 'Enter' && e.currentTarget.blur();
+
+/** A form's error, when there is one. */
+export const Err = (p: { text?: string | false | null; class?: string }) => (
+  <Show when={p.text}>
+    <div class={`d-form-error ${p.class ?? ''}`} role="alert">{p.text}</div>
+  </Show>
 );
 
 /** A search box. */

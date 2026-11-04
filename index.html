@@ -42,6 +42,7 @@
   doc      { format:"dashier", version:1, title, theme?, canvas?:{width, height} (fixed page size in px, default 1440×810;
     viewers zoom and pan, never reflow, except phones under 640px wide, which stack it into one column: cards two to
     a row first, then the other visuals in reading order, slicers in a drawer; it grows taller to fit),
+    currency?:"USD"|"EUR"|"JPY"|"GBP"|"CNY"|"AUD"|"CAD"|"CHF"|"HKD"|"SGD" (every "currency" format's; default USD),
     sources:{<id>:Source}, pages:[Page], filters?:[Filter] (every page), relationships?:[Relationship],
     measures?:[Measure], encryption?:Encryption }
   Source   { structure:[{name, type, sortBy?}], payload }
@@ -75,10 +76,10 @@
       barWidth? (0.2-1, default 0.7), barRadius? (px), lineWidth? (px), markers?:true|false,
       refLines?:[{value | stat:"average"|"median"|"min"|"max" (of the first series), label?, color?}],
       donutHole? (0.2-0.85)}
-    card     aggregation:{method:Aggregate, field}, format?, units?, subtitle? (static), staticValue?, compare?:Compare,
+    card     aggregation:{method:Aggregate, field}, format?, units?, subtitle? (static), compare?:Compare,
       callout?:{size? (px), color?, align?:"left"}
-    table    columns?:[{field, label, align?, format?:Format|"date", units?, aggregate?, showAs?:"percent-of-total",
-      datePart?, cond?:"scale"|"bars"}] (default all; with any column aggregated, one row per combination of the
+    table    columns?:[{field, label?, format?:Format|"date", units?, aggregate?, showAs?:"percent-of-total",
+      datePart?, cond?:"scale"|"bars"}] (with any column aggregated, one row per combination of the
       others), totals?:false, grid?:Grid
   Grid     { density?:"compact"|"roomy", banded?:true, lines?:"both"|"none", textSize? (px) } (tables and matrices)
     matrix   rows?:[{field, datePart?}] (hierarchy, outer first), columns?:[{field, datePart?}], values?:[{field, label?,
@@ -111,7 +112,7 @@
     round/format filters); table cells up to 3 decimals, matrix cells up to 2, in the viewer's locale.
     "number": under 1,000 as is, up to 2 decimals (999, 7.46, -182.50, 0.004); from 1,000 compact, 1 decimal (1.2K, 1.0M)
     "integer": rounded, viewer's locale (1,235; 0.336 → 0) · "percent": fraction ×100, 1 decimal (0.336 → 33.6%)
-    "currency": US$, whole dollars from $100 ($1,235, -$183), cents below ($5.86, $5 when whole, $0.34)
+    "currency": in the document's currency (US$ shown), whole units from $100 ($1,235, -$183), cents below ($5.86, $5 when whole, $0.34)
     Units: ÷ and suffix, 2 decimals (integer: whole): $416.16B, 1,094M; auto = largest unit reached; percent ignores.
     Table "date"/"string": values as written. Charts: options.format, else the measure's format (not its units);
     axes compact ($50B), data labels 3 digits under 1,000 ($7.46, $225) else 1 decimal ($1.1B), options.units fixes
@@ -155,15 +156,15 @@
    {"id": "build_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Build a visual\n1. Click an empty spot on the page, then pick a visual in the **Visualizations** pane. With a visual selected, picking another type switches it.\n2. Drag fields from the **Data** pane into its slots: X-axis, Y-axis, Legend and so on.\n3. Open a field's menu in a slot (⌄) to choose Sum, Average or Count, show it as a % of the grand total, or group a date by year, quarter or month.\n4. The **Format** tab sets the title, number format, sort order, top N, legend and data labels.\n\nDrag a visual to move it and pull its edges to resize. Right-click it to duplicate or delete.\n\n**Your turn:** select the empty chart and drag **region** onto the X-axis and **revenue** onto the Y-axis."},
    {"id": "build_yours", "type": "chart", "x": 4, "y": 0, "w": 4, "h": 4, "title": "Your turn: revenue by region", "chartType": "bar", "mapping": {}},
    {"id": "build_pie", "type": "chart", "x": 8, "y": 0, "w": 4, "h": 4, "title": "Revenue share by category", "chartType": "pie", "sourceId": "sales", "mapping": {"x": "category", "y": "revenue"}, "options": {"showValues": true, "format": "currency"}},
-   {"id": "build_table", "type": "table", "x": 4, "y": 4, "w": 8, "h": 4, "title": "Revenue and units by region and category", "sourceId": "sales", "columns": [{"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "align": "right", "format": "currency", "aggregate": "sum", "cond": "bars"}, {"field": "units", "label": "Units", "align": "right", "format": "integer", "aggregate": "sum", "cond": "scale"}]}
+   {"id": "build_table", "type": "table", "x": 4, "y": 4, "w": 8, "h": 4, "title": "Revenue and units by region and category", "sourceId": "sales", "columns": [{"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "format": "currency", "aggregate": "sum", "cond": "bars"}, {"field": "units", "label": "Units", "format": "integer", "aggregate": "sum", "cond": "scale"}]}
   ]},
   {"id": "page_filter", "title": "Filter and slice", "elements": [
    {"id": "filter_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Filter and slice\n**Slicers** are filters that live on the page. The two at the top filter everything else here, and the pick is saved with the file. Their style (list, dropdown, tiles, range) is in the Format tab.\n\nThe **Filters** pane takes a field dragged onto *On this visual*, *On this page* or *On all pages*. A date filter can also keep only the last few days, weeks, months or years.\n\nThe software chart has a filter of its own: select it and look in the Filters pane.\n\n**Connected tables filter each other.** Managers and targets come from the *regions* table, linked to *sales* by region. To see the link, right-click *sales* in the Data pane ▸ **Edit data… ▸ Relationships**."},
    {"id": "filter_category", "type": "slicer", "x": 4, "y": 0, "w": 4, "h": 1, "title": "Category", "sourceId": "sales", "field": "category", "style": "dropdown"},
    {"id": "filter_quarter", "type": "slicer", "x": 8, "y": 0, "w": 4, "h": 1, "title": "Quarter", "sourceId": "sales", "field": "date", "datePart": "quarter", "style": "tiles"},
    {"id": "filter_trend", "type": "chart", "x": 4, "y": 1, "w": 8, "h": 4, "title": "Revenue by month and region", "chartType": "line", "sourceId": "sales", "mapping": {"x": "date", "y": "revenue", "group": "region"}, "dateParts": {"x": "month"}, "options": {"format": "currency"}},
-   {"id": "filter_software", "type": "chart", "x": 4, "y": 5, "w": 4, "h": 3, "title": "Software only: revenue by manager", "chartType": "hbar", "sourceId": "sales", "mapping": {"x": "regions.manager", "y": "revenue"}, "filters": [{"field": "category", "values": ["Software"]}], "options": {"format": "currency", "sort": "value-desc"}},
-   {"id": "filter_targets", "type": "table", "x": 8, "y": 5, "w": 4, "h": 3, "title": "Targets (regions table)", "sourceId": "regions", "columns": [{"field": "region", "label": "Region"}, {"field": "manager", "label": "Manager"}, {"field": "target", "label": "Target", "align": "right", "format": "currency"}]}
+   {"id": "filter_software", "type": "chart", "x": 4, "y": 5, "w": 4, "h": 3, "title": "Software only: revenue by manager", "chartType": "hbar", "sourceId": "sales", "mapping": {"x": "regions.manager", "y": "revenue"}, "filters": [{"field": "category", "table": "sales", "values": ["Software"]}], "options": {"format": "currency", "sort": "value-desc"}},
+   {"id": "filter_targets", "type": "table", "x": 8, "y": 5, "w": 4, "h": 3, "title": "Targets (regions table)", "sourceId": "regions", "columns": [{"field": "region", "label": "Region"}, {"field": "manager", "label": "Manager"}, {"field": "target", "label": "Target", "format": "currency"}]}
   ]},
   {"id": "page_measures", "title": "Measures and text", "elements": [
    {"id": "measures_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Measures and text\nA **measure** is a named calculation you can drop into any visual. Right-click a table in the Data pane ▸ **Create measure…** and choose either:\n- a summary, like Sum of revenue where category is Software, or\n- a calculation between two values: add, subtract, multiply, divide or % difference.\n\nThis file has two measures, *Revenue per unit* and *Software revenue*. Drag them like any other field. The card compares Q4 with Q3: its field's menu (⌄) ▸ **Compare with**.\n\n**Text boxes** mix writing with live numbers. Select the Highlights box: each name in double curly braces gets a slot under the text. Drop a field on the slot, then pick its summary and format from the field's menu. The list of managers repeats a line for each row of the *regions* table; the Build tab shows how it's written."},
@@ -173,7 +174,7 @@
   ]},
   {"id": "page_data", "title": "Your data", "elements": [
    {"id": "data_text", "type": "markdown", "x": 0, "y": 0, "w": 4, "h": 8, "content": "## Your own data\n**Add a table:** **+ Import data…** at the bottom of the Data pane. Drop a CSV or JSON file or paste text, check the column types and name the table.\n\n**Tidy it:** right-click a table ▸ **Edit data…** to change column types, rename columns, connect it to other tables and see which visuals use it.\n\n**Update it:** **Replace data…** loads a newer CSV into the same table and keeps every visual. It warns you if a column the report uses has gone missing.\n\n**Make it yours:** click an empty part of the page for the report theme and page size. Rename, duplicate or delete pages by right-clicking their tabs.\n\n**Share it:** **Share ▸ Save** writes everything into this file. **Print…** lays the pages out for paper or PDF.\n\nWhen you're done, delete these pages and the *sales* and *regions* tables, and start your own report."},
-   {"id": "data_table", "type": "table", "x": 4, "y": 0, "w": 8, "h": 8, "title": "The sales table: click a header to sort", "sourceId": "sales", "columns": [{"field": "date", "label": "Month"}, {"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "align": "right", "format": "currency"}, {"field": "units", "label": "Units", "align": "right", "format": "integer"}]}
+   {"id": "data_table", "type": "table", "x": 4, "y": 0, "w": 8, "h": 8, "title": "The sales table: click a header to sort", "sourceId": "sales", "columns": [{"field": "date", "label": "Month"}, {"field": "region", "label": "Region"}, {"field": "category", "label": "Category"}, {"field": "revenue", "label": "Revenue", "format": "currency"}, {"field": "units", "label": "Units", "format": "integer"}]}
   ]}
  ]
 }

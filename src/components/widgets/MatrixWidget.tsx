@@ -3,9 +3,43 @@ import { MatrixElement, MatrixValue } from '../../types/model';
 import { store } from '../../runtime/store';
 import { MatrixRow, buildMatrix } from '../../runtime/matrix';
 import { pct, withUnits } from '../../runtime/charts';
-import { sortOrder } from '../../runtime/data';
-import { SAMPLE, cellText, colWidth, condStyle, createSort, createVirtualRows, rangeOf, rowHeight, summaryHeader } from './tableKit';
-import { SortTh, TableShell } from './TableWidget';
+import { sortOrder, flipped } from '../../runtime/data';
+import { SAMPLE, cellText, condStyle, plainNumber, rangeOf, rowHeight, summaryHeader, td } from '../../runtime/grid';
+import { SortTh, TableShell, createSort, createVirtualRows } from './TableWidget';
+
+const measureOf = (el: MatrixElement, ref: string) => store.measureInfo(el.sourceId, ref, el);
+/** A matrix's numbers, under its filters: what its widget draws and its CSV holds. */
+const matrixOf = (el: MatrixElement) =>
+  buildMatrix(el, store.getFrame(el), (ref) => measureOf(el, ref)?.fn, (f) => store.sortOrder(el.sourceId, f), (c) => {
+    const o = store.comparedView(el, c);
+    return { ...o, measure: (ref) => o.measure(ref)?.fn };
+  });
+/** A value's header: its label, else its summary or measure's name. */
+const valueLabelOf = (el: MatrixElement, v: MatrixValue) =>
+  v.label || summaryHeader(v.field, v.aggregate ?? 'sum', v.showAs, measureOf(el, v.field), v.compare);
+/** The row fields' names, read as words: "region / cost_type" → "Region / cost type". */
+const rowTitleOf = (el: MatrixElement) => (el.rows ?? []).map((f) => f.field.split('.').pop()!.replace(/_/g, ' ')).join(' / ').replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * A matrix as CSV rows: a header (each column's keys, and with several values, the value), every row group expanded
+ * (indented by depth), and the totals. Numbers stay numbers (shares as fractions), for a spreadsheet to format.
+ */
+export function matrixCSV(el: MatrixElement): string[][] {
+  const m = matrixOf(el), vals = el.values ?? [], nv = vals.length, n = (m.cols + (m.totalCol ? 1 : 0)) * nv;
+  // each column's keys, a level at a time (a header spans the columns under it)
+  const keysOf = (col: number) =>
+    m.headers.map((level) => {
+      let at = 0;
+      return level.find((h) => (at += h.span) > col)?.label ?? 'Total';
+    });
+  const head = Array.from({ length: n }, (_, c) => [...keysOf(Math.floor(c / nv)), ...(nv > 1 || !m.headers.length ? [valueLabelOf(el, vals[c % nv])] : [])].join(' · '));
+  const line = (label: string, cells: (number | string | null)[]) => [label, ...Array.from({ length: n }, (_, c) => String(cells[c] ?? ''))];
+  const out = [[rowTitleOf(el), ...head]];
+  const walk = (rows: MatrixRow[]) => rows.forEach((r) => (out.push(line('  '.repeat(r.depth) + r.label, r.cells)), walk(r.children)));
+  walk(m.rows);
+  out.push(line('Total', m.total));
+  return out;
+}
 
 /**
  * A matrix: row headers in a stepped hierarchy (each group expands into the next level), column
@@ -14,24 +48,15 @@ import { SortTh, TableShell } from './TableWidget';
  */
 export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
   const el = () => props.element;
-  const measureOf = (ref: string) => store.measureInfo(el().sourceId, ref, el());
-  const matrix = createMemo(() =>
-    buildMatrix(el(), store.getFrame(el()), ref => measureOf(ref)?.fn, f => store.sortOrder(el().sourceId, f), c => {
-      const o = store.comparedView(el(), c);
-      return { ...o, measure: ref => o.measure(ref)?.fn };
-    })
-  );
-  const values = () => el().values ?? [];
+  const matrix = createMemo(() => matrixOf(el()));
+  // plain copies: every cell reads its value's settings, and a store object's reads go through its proxy
+  const values = createMemo(() => (el().values ?? []).map((v) => ({ ...v })));
   const nv = () => values().length;
   /** Each row's cells by index: each column (and the Total column) has one per value. */
   const cellIndexes = createMemo(() => Array.from({ length: (matrix().cols + (matrix().totalCol ? 1 : 0)) * nv() }, (_, c) => c));
 
   const [collapsed, setCollapsed] = createSignal(new Set<string>());
-  const toggle = (path: string) => {
-    const next = new Set(collapsed());
-    next.has(path) ? next.delete(path) : next.add(path);
-    setCollapsed(next);
-  };
+  const toggle = (path: string) => setCollapsed((s) => flipped(s, path));
   // a header click sorts by that cell (−1: the row labels)
   const sorter = createSort<number>(), { sort } = sorter;
 
@@ -52,17 +77,19 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
   });
   const virtual = createVirtualRows(() => visible().length, () => rowHeight(el().grid));
 
-  const valueLabel = (v: MatrixValue) =>
-    v.label && v.label !== v.field ? v.label : summaryHeader(v.field, v.aggregate ?? 'sum', v.showAs, measureOf(v.field), v.compare);
+  const valueLabel = (v: MatrixValue) => valueLabelOf(el(), v);
   // a % change is a percent; otherwise the value's format and display units
-  const cell = (x: number | string | null | undefined, v: MatrixValue) =>
-    cellText(x, pct(v.showAs), v.compare && !v.compare.show ? 'percent' : withUnits(v.format || measureOf(v.field)?.format, v.units), x =>
-      typeof x === 'number' ? x.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(x)
-    );
+  /** How each value's cells read, worked out once for the value rather than per cell. */
+  const looks = createMemo(() =>
+    values().map((v) => {
+      const format = v.compare && !v.compare.show ? 'percent' : withUnits(v.format || measureOf(el(), v.field)?.format, v.units);
+      return (x: number | string | null | undefined) => cellText(x, pct(v.showAs), format, (x) => (typeof x === 'number' ? plainNumber(x) : String(x)));
+    })
+  );
+  const cell = (x: number | string | null | undefined, v: MatrixValue) => looks()[values().indexOf(v)](x);
   /** A row's cells, blank on a group's row when subtotals are off. */
   const cellsOf = (r: MatrixRow) => (r.children.length && el().subtotals === false ? [] : r.cells);
-  // the row fields' names, read as words: "region / cost_type" → "Region / cost type"
-  const rowTitle = () => (el().rows ?? []).map(f => f.field.split('.').pop()!.replace(/_/g, ' ')).join(' / ').replace(/^./, c => c.toUpperCase());
+  const rowTitle = () => rowTitleOf(el());
 
   /** Each value's range over the innermost rows (not subtotals or totals), for conditional formatting. */
   const ranges = createMemo(() => {
@@ -72,21 +99,25 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
     return values().map((v, i) => (v.cond ? rangeOf(leaves.length * matrix().cols, k => leaves[Math.floor(k / matrix().cols)].cells[(k % matrix().cols) * nv() + i]) : undefined));
   });
 
-  /** Column widths: from the headers, the totals and a sample of rows. */
-  const widths = createMemo(() => {
+  const columnFields = () => (nv() ? el().columns ?? [] : []);
+  const valueHeaders = () => columnFields().length === 0 || nv() > 1;
+
+  /**
+   * What the columns are sized from: the headers, the totals and a sample of rows. The row headers are indented by
+   * their depth after a collapse button; with one value, each column's header is its own column key.
+   */
+  const cols = createMemo(() => {
     const rows = visible().slice(0, SAMPLE);
-    const label = Math.max(rowTitle().length, 5, ...rows.map(r => r.label.length + 2 * r.depth + 3));
+    const keys = columnFields().length && nv() === 1 ? matrix().headers.at(-1) : undefined;
     return [
-      Math.min(label, 48) + 2,
-      ...cellIndexes().map(c => {
+      { head: rowTitle(), total: 'Total', cells: rows.map((r) => r.label), inset: 18 + 16 * Math.max(0, ...rows.map((r) => r.depth)) },
+      ...cellIndexes().map((c) => {
         const v = values()[c % nv()];
-        return colWidth(valueLabel(v), [cell(matrix().total[c], v), ...rows.map(r => cell(r.cells[c], v))], 40);
+        return { head: keys ? keys[c]?.label ?? 'Total' : valueLabel(v), total: cell(matrix().total[c], v), cells: rows.map((r) => cell(r.cells[c], v)) };
       })
     ];
   });
 
-  const columnFields = () => (nv() ? el().columns ?? [] : []);
-  const valueHeaders = () => columnFields().length === 0 || nv() > 1;
   // the top-left header: the row fields' names; a click sorts by them
   const corner = (rowSpan?: number) => (
     <SortTh sort={sorter} k={-1} class="d-matrix-corner" rowSpan={rowSpan}>
@@ -100,7 +131,7 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
       grid={el().grid}
       show={(el().rows?.length || 0) + (el().columns?.length || 0) + nv()}
       class="d-table d-matrix"
-      widths={widths()}
+      cols={cols()}
       virtual={virtual}
       head={
         <thead>
@@ -155,7 +186,7 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
     >
       <For each={visible().slice(virtual.range().start, virtual.range().end)}>
         {(r, i) => (
-          <tr class={`${r.children.length ? 'd-matrix-group-row' : ''} ${(virtual.range().start + i()) % 2 ? 'odd' : ''}`}>
+          <tr class={`${r.children.length ? 'd-matrix-group-row' : ''} ${(virtual.range().start + i()) % 2 ? 'odd' : ''}`} data-p={virtual.range().start + i()}>
             <th class="d-matrix-row" style={{ 'padding-left': `${10 + r.depth * 16}px` }}>
               <Show when={r.children.length} fallback={<span class="d-matrix-toggle" />}>
                 <button class="d-matrix-toggle" title={collapsed().has(r.path) ? 'Expand' : 'Collapse'} onClick={() => toggle(r.path)}>
@@ -164,18 +195,12 @@ export const MatrixWidget: Component<{ element: MatrixElement }> = (props) => {
               </Show>
               {r.label}
             </th>
-            <For each={cellIndexes()}>
-              {(c) => {
-                const v = () => values()[c % nv()];
-                const x = () => cellsOf(r)[c];
-                const inTotal = () => matrix().totalCol && c >= matrix().cols * nv();
-                return (
-                  <td class="td-right" style={!r.children.length && !inTotal() ? condStyle(v().cond, x(), ranges()[c % nv()]) : undefined}>
-                    {cell(x(), v())}
-                  </td>
-                );
-              }}
-            </For>
+            {/* the row's cells, made in one pass (grid.ts's td); a group's subtotals and the Total column aren't shaded */}
+            {cellIndexes().map((c) => {
+              const i = c % nv(), x = cellsOf(r)[c];
+              const plain = r.children.length || (matrix().totalCol && c >= matrix().cols * nv());
+              return td(looks()[i](x), 'td-right', plain ? undefined : condStyle(values()[i].cond, x, ranges()[i]));
+            })}
           </tr>
         )}
       </For>

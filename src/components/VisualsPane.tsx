@@ -3,7 +3,7 @@ import { Component, Show, For, createEffect, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Seg } from './ui';
 import { DroppedField, dropProps } from '../runtime/dnd';
-import { chartKind, summaryLabel, valueLabel } from '../runtime/charts';
+import { summaryLabel, valueLabel } from '../runtime/charts';
 import type { DatePart } from '../runtime/dates';
 import { isMeasureRef, measureName } from '../runtime/measures';
 import { AggregationMethod, ChartType, Compare, MatrixField, MatrixValue, ShowAs, TableColumn, ValueSummary, WidgetType } from '../types/model';
@@ -60,8 +60,8 @@ export const VisualsPane: Component = () => {
   const setClean = (prop: string, val: any) => set(prop, clone(val));
   const setIn = (prop: string, key: string, val: any) => set(prop, { ...(sel()?.[prop] || {}), [key]: val === '' ? undefined : val });
   const setAgg = (prop: string) => (m?: AggregationMethod) => set(prop, m === 'sum' ? undefined : { aggregate: m });
-  const isType = (t: WidgetType, c?: ChartType) => sel()?.type === t && (!c || chartKind(sel().chartType) === c);
-  const chartIs = (...types: ChartType[]) => isType('chart') && types.includes(chartKind(sel().chartType));
+  const isType = (t: WidgetType, c?: ChartType) => sel()?.type === t && (!c || sel().chartType === c);
+  const chartIs = (...types: ChartType[]) => isType('chart') && types.includes(sel().chartType);
 
   const [over, setOver] = createSignal(false);
   /** A field dropped on a text box's text: inserts {{ name }} and binds it (summarized in the slot list below). */
@@ -75,9 +75,8 @@ export const VisualsPane: Component = () => {
   createEffect(() => (sel()?.id, store.setDropNote('')));
   const take = (slot: Slot) => (f: DroppedField): boolean => !!f.field && store.assignField(sel(), slot, { table: f.table, field: f.field });
 
-  /** A table's columns (one that names none shows every field of its table), or a matrix's rows, columns or values. */
-  const list = (key: List): any[] =>
-    sel()?.[key]?.length ? sel()[key] : isType('table') && sel().sourceId ? store.defaultColumns(sel().sourceId) : [];
+  /** A table's columns, or a matrix's rows, columns or values. */
+  const list = (key: List): any[] => sel()?.[key] ?? [];
   const patchAt = (key: List, i: number, patch: object) => setClean(key, list(key).map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const moveIn = (key: List) => (from: number, to: number) => {
     const l = [...list(key)];
@@ -121,7 +120,7 @@ export const VisualsPane: Component = () => {
 
   // a value along a chart's axis: run up, or compared with the same category of another period
   const alongAxis = (s: ValueSummary | undefined, patch: (p: ValueSummary) => void) => [
-    showAsSection(s?.showAs, (v) => patch({ showAs: v }), true),
+    showAsSection(s?.showAs, (v) => patch({ showAs: v }), true, isDate(sel().mapping?.x)),
     ...compareSections(s?.compare, (c) => patch({ compare: c }), false)
   ];
 
@@ -178,19 +177,16 @@ export const VisualsPane: Component = () => {
       const patch = (p: Partial<TableColumn>) => patchAt('columns', i, p);
       const showAs = showAsSection(c.showAs, (v) => patch({ showAs: v }));
       const formats = [condSection(c.cond, (v) => patch({ cond: v })), formatSection(c.format, (f) => patch({ format: f })), unitsSection(c.units, (u) => patch({ units: u }))];
-      const onRename = (label: string) => patch({ label });
+      // its name unless renamed (a rename back to it forgets the label)
+      const name = isMeasureRef(c.field) || c.aggregate ? valueName(c.field, c.aggregate ?? 'sum', c.showAs) : where(c.field).field + partName(c.datePart);
+      const more = { onRename: (label: string) => patch({ label: label === name ? undefined : label }), renameValue: c.label ?? name };
       // a measure column is always a summarized value, so no Summarize or date grouping
-      return isMeasureRef(c.field)
-        ? pill('column', c.field, c.label !== c.field ? c.label : valueName(c.field, 'sum', c.showAs), [showAs, ...formats], {
-            onRename,
-            renameValue: c.label === c.field ? measureName(c.field) : c.label
-          })
-        : pill('column', c.field, c.aggregate && c.label === c.field ? summaryLabel(where(c.field).field, c.aggregate, c.showAs) : c.label + partName(c.datePart), [
+      return pill('column', c.field, c.label ?? name, isMeasureRef(c.field) ? [showAs, ...formats] : [
             ...(isDate(c.field) && !c.aggregate ? [dateSection(c.datePart, (p) => patch({ datePart: p }))] : []),
             summarizeSection(c.aggregate, numeric(c.field), (m) => patch({ aggregate: m, showAs: m ? c.showAs : undefined }), { allowNone: true, values: true }),
             ...(c.aggregate ? [showAs] : []),
             ...(numeric(c.field) || c.aggregate ? formats : [])
-          ], { onRename, renameValue: c.label });
+          ], more);
     });
 
   // --- Matrix wells: rows and columns are headers, values are summarized ---
@@ -202,7 +198,8 @@ export const VisualsPane: Component = () => {
       const name = valueName(v.field, v.aggregate ?? 'sum', v.showAs, v.compare);
       return pill('value', v.field, v.label ?? name, [
         ...summarize(v.field, v.aggregate ?? 'sum', (m) => patch({ aggregate: m === 'sum' ? undefined : m }), { values: true }),
-        showAsSection(v.showAs, (s) => patch({ showAs: s }), true),
+        // a matrix runs along its columns, or down its rows when it has none
+        showAsSection(v.showAs, (s) => patch({ showAs: s }), true, ((sel().columns?.length ? sel().columns : sel().rows) ?? []).some((f: MatrixField) => isDate(f.field))),
         ...compareSections(v.compare, (c) => patch({ compare: c }), false),
         condSection(v.cond, (c) => patch({ cond: c })),
         formatSection(v.format, (f) => patch({ format: f })),

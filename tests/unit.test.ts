@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregate, buildChart, chartKind, comparison, withUnits, formatCompact, formatFull, formatValue, orderCategories, pivot, summarizeRead, summarizeValue, summaryLabel } from '../src/runtime/charts';
+import { run as runAlong, aggregate, buildChart, comparison, withUnits, formatCompact, formatFull, formatValue, orderCategories, setCurrency, pivot, summarizeRead, summarizeValue, summaryLabel } from '../src/runtime/charts';
 import { compareText, filterTest, keyText, shiftFilters, sortOrder, sortText } from '../src/runtime/data';
-import { distinctOf, filterFrame, frameRows, joinFrame, reader, rowsFrame, subset, tableFrame } from '../src/runtime/frames';
+import { distinctOf, filterFrame, filterMask, maskFrame, frameRows, joinFrame, reader, rowsFrame, subset, tableFrame } from '../src/runtime/frames';
 import { datePartKey, datePartLabel, inRange, lastRange, shiftKey, shiftRange, toISODate } from '../src/runtime/dates';
 import { CONVERT, applyTypes, columnsText, csvReader, csvHead, inferStructure, parseCSV, parseJSON, textToColumnsAsync } from '../src/runtime/hydrate';
 import { blobOf, decompressPayload, expandPayloads, hold, holdBase64, holdText, isHeld, payloadSize, payloadText } from '../src/runtime/payloads';
@@ -10,7 +10,9 @@ import { deriveLock, seal, unseal } from '../src/runtime/crypt';
 import { parseMarkdown } from '../src/runtime/markdown';
 import { renameInTemplate, renderTemplate, templateVariables } from '../src/runtime/template';
 import { scatterPoints } from '../src/runtime/draw/scatter';
-import { buildMatrix } from '../src/runtime/matrix';
+import { buildMatrix, chartMatrix } from '../src/runtime/matrix';
+import { columnWidths, rowHeights } from '../src/runtime/grid';
+import { pushDown } from '../src/runtime/layout';
 import { fitText, layoutLabel, measurer, num, tickLabels, valueAxis } from '../src/runtime/draw/svg';
 import { ColumnTable, cellReader, columnsFromRows, columnsFromText } from '../src/runtime/columns';
 import { gzipSync } from 'node:zlib';
@@ -36,7 +38,7 @@ test('summarize: numeric summaries skip blanks and text', () => {
   assert.equal(summarize(v, 'max'), 9);
   assert.equal(summarize(v, 'median'), 4);
   assert.equal(summarize([1, 2, 3, 4], 'median'), 2.5);
-  assert.equal(summarize(v, 'latest'), 9);
+  assert.equal(summarize(v, 'last'), 9);
   assert.equal(summarize(['a', 'b'], 'sum'), null);
 });
 
@@ -488,7 +490,6 @@ test('scatter: round axis ticks; a fixed minimum and maximum are kept', () => {
   assert.equal(fixed.lo, 10);
   assert.equal(fixed.hi, 90);
   assert.deepEqual(fixed.ticks, [20, 40, 60, 80]);
-  assert.equal(chartKind('scatter'), 'scatter');
 });
 
 // --- drawing -----------------------------------------------------------------------
@@ -624,7 +625,6 @@ test('summaries: spread, most common, first and last; text and dates where a sin
   assert.equal(summarize(v, 'mode'), 4);
   assert.equal(summarize([3, null, 8, ''], 'first'), 3);
   assert.equal(summarize([3, null, 8, ''], 'last'), 8);
-  assert.equal(summarize([3, 8], 'latest'), 8, 'older files say latest');
   const value = (values: unknown[], m: Parameters<typeof summarizeValue>[2]) => summarizeValue(values.length, k => values[k], m);
   const regions = ['West', 'east', '', 'North', 'West', null];
   assert.equal(value(regions, 'min'), 'east');
@@ -1174,4 +1174,130 @@ test('click to filter: bars, slices and blocks pick their value; blanks, "Other"
   const tree = buildChart(chart({ chartType: 'treemap', mapping: { x: 'c', y: 'v', group: 'g' } }), rowsFrame(rows.slice(0, 2)));
   const leaf = [0, 1, 2, 3].map(i => tree.pick!(piece(i))).find(p => p?.x === 'a');
   assert.deepEqual([leaf?.x, leaf?.group], ['a', 'x']);
+});
+
+test('rowHeights: rows start at the estimate, and a measured row moves the ones after it', () => {
+  const h = rowHeights(1000, 28);
+  assert.equal(h.top(10), 280);
+  assert.equal(h.at(0), 0);
+  assert.equal(h.at(279), 9);
+  assert.equal(h.at(280), 10);
+  assert.equal(h.set(5, 40), 12);
+  assert.equal(h.set(5, 40.2), 0); // under half a pixel: no change
+  assert.equal(h.top(5), 140);
+  assert.equal(h.top(6), 180);
+  assert.equal(h.top(1000), 28012);
+  assert.equal(h.at(179), 5);
+  assert.equal(h.at(180), 6);
+  assert.equal(h.set(5, 20), -20);
+  assert.equal(h.top(6), 160);
+  assert.equal(h.at(1e9), 999);
+  assert.equal(rowHeights(0, 28).at(50), 0);
+  // the same answers as adding the heights up one by one
+  const n = 777, hs = Array.from({ length: n }, (_, i) => 22 + ((i * 37) % 19)), g = rowHeights(n, 22);
+  hs.forEach((x, i) => g.set(i, x));
+  let y = 0;
+  for (let i = 0; i < n; i++) {
+    assert.equal(g.top(i), y);
+    assert.equal(g.at(y + hs[i] / 2), i);
+    y += hs[i];
+  }
+});
+
+test('columnWidths: the widest of header, total and cells, in the font size, within bounds', () => {
+  const [a, b, c] = columnWidths([
+    { head: 'Region', cells: ['North', 'Central'] },
+    { head: 'Units', cells: ['1', '22'], total: '1,234,567,890' },
+    { head: 'Notes', cells: ['x'.repeat(500)] }
+  ], { family: 'sans-serif', size: 10 });
+  assert.ok(a >= 62 && a < 120, String(a)); // at least 4em, plus padding
+  assert.ok(b > a, `${b} > ${a}`); // the total is the widest thing in its column
+  assert.equal(c, 28 * 10 + 22); // capped at 28em
+  const [big] = columnWidths([{ head: 'Region', cells: ['North'] }], { family: 'sans-serif', size: 20 });
+  assert.ok(big > a, 'a larger text size makes wider columns');
+  const [indented] = columnWidths([{ head: 'R', cells: ['North'], inset: 50 }], { family: 'sans-serif', size: 10 });
+  assert.ok(indented >= a + 30 || indented > 90, String(indented));
+});
+
+test('run: a value along an axis, added up, year to date, or as a rolling average', () => {
+  const keys = ['2024-11', '2024-12', '2025-01', '2025-02'];
+  assert.deepEqual(runAlong([1, 2, 3, 4], 'running-total', keys), [1, 3, 6, 10]);
+  assert.deepEqual(runAlong([1, 2, 3, 4], 'ytd', keys), [1, 3, 3, 7]);
+  assert.deepEqual(runAlong([3, 6, 9, 12], 'moving-average'), [3, 4.5, 6, 9]);
+  assert.deepEqual(runAlong([1, 2], undefined), [1, 2]);
+  assert.deepEqual(runAlong([5, 5, 5], 'ytd', ['2024', '2025', '2026']), [5, 5, 5]);
+});
+
+test('matrix: year to date restarts each year along the rows', () => {
+  const rows = [{ m: '2024-11-01', v: 1 }, { m: '2024-12-01', v: 2 }, { m: '2025-01-01', v: 3 }, { m: '2025-02-01', v: 4 }];
+  const m = buildMatrix({ id: 'x', type: 'matrix', rows: [{ field: 'm', datePart: 'month' }], values: [{ field: 'v', showAs: 'ytd' }] } as any, rowsFrame(rows));
+  assert.deepEqual(m.rows.map((r) => r.cells[0]), [1, 3, 3, 7]);
+});
+
+test('filterMask and maskFrame: the rows of each filter on their own, then the rows passing them all', () => {
+  const f = rowsFrame([{ r: 'East', v: 10 }, { r: 'West', v: 20 }, { r: 'East', v: 30 }]);
+  const east = filterMask(f, { field: 'r', values: ['East'] })!, big = filterMask(f, { field: 'v', min: 15 })!;
+  assert.deepEqual([...east], [1, 0, 1]);
+  assert.deepEqual([...big], [0, 1, 1]);
+  assert.equal(filterMask(f, { field: 'nope', values: ['x'] }), null);
+  assert.deepEqual(frameRows(maskFrame(f, [east, big])).map((x) => x.v), [30]);
+  assert.equal(maskFrame(f, []), f);
+  assert.equal(maskFrame(f, [new Uint8Array([1, 1, 1])]), f);
+});
+
+test('pushDown: what a moved visual lands on moves below it, and what that lands on, in turn', () => {
+  const others = [
+    { id: 'a', x: 0, y: 0, w: 6, h: 2 },
+    { id: 'b', x: 0, y: 2, w: 6, h: 2 },
+    { id: 'c', x: 6, y: 0, w: 6, h: 4 }
+  ];
+  // onto a's lower half: a moves below it, then b below a
+  const p = pushDown(others, { id: 'm', x: 0, y: 1, w: 3, h: 2 });
+  assert.equal(p.get('a'), 3);
+  assert.equal(p.get('b'), 5);
+  assert.equal(p.has('c'), false);
+  assert.equal(pushDown(others, { id: 'm', x: 0, y: 9, w: 12, h: 1 }).size, 0);
+  // a visual resized in place pushes nothing but what it covers, and never itself
+  assert.deepEqual([...pushDown(others, { id: 'a', x: 0, y: 0, w: 6, h: 3 })], [['b', 3]]);
+});
+
+test("chartMatrix: a chart's categories down, its series across, its values as it summarizes them", () => {
+  const m = chartMatrix({ id: 'c', type: 'chart', chartType: 'combo', sourceId: 't', filters: [{ field: 'r', values: ['E'] }], mapping: { x: 'month', y: 'rev', group: 'region', line: 'units' }, dateParts: { x: 'month' }, summary: { aggregate: 'avg', showAs: 'ytd' } } as any);
+  assert.equal(m.id, 'c');
+  assert.deepEqual(m.rows, [{ field: 'month', datePart: 'month' }]);
+  assert.deepEqual(m.columns, [{ field: 'region', datePart: undefined }]);
+  assert.deepEqual(m.values!.map((v) => [v.field, v.aggregate, v.showAs]), [['rev', 'avg', 'ytd'], ['units', undefined, undefined]]);
+  assert.deepEqual(m.filters, [{ field: 'r', values: ['E'] }]);
+  const s = chartMatrix({ id: 's', type: 'chart', chartType: 'scatter', mapping: { x: 'a', y: 'b', detail: 'name' } } as any);
+  assert.deepEqual([s.rows, s.values!.map((v) => v.field)], [[{ field: 'name', datePart: undefined }], ['a', 'b']]);
+});
+
+test('currency: every currency format writes the report currency', () => {
+  setCurrency('EUR');
+  try {
+    assert.equal(formatValue(1600, 'currency'), '€1,600');
+    assert.equal(formatValue(5.86, 'currency'), '€5.86');
+    assert.equal(formatValue(416.16e9, 'currency|billions'), '€416.16B');
+    assert.equal(formatCompact(1600, 'currency'), '€1.6K');
+    assert.equal(formatCompact(2.5e6, 'currency|millions'), '€2.5M');
+    assert.equal(formatFull(124501, 'currency'), '€124,501');
+    setCurrency('JPY');
+    assert.equal(formatValue(1600, 'currency'), '¥1,600');
+    setCurrency('CHF');
+    assert.equal(formatValue(2e6, 'currency|millions'), 'CHF 2.00M', 'a code-like symbol keeps its space');
+  } finally {
+    setCurrency('USD');
+  }
+  assert.equal(formatValue(1600, 'currency'), '$1,600');
+});
+
+test('scatter: the legend in its field’s order, the x axis titled by xAxisLabel', () => {
+  const f = rowsFrame([{ x: 1, y: 2, g: 'b' }, { x: 2, y: 3, g: 'a' }, { x: 3, y: 1, g: 'c' }]);
+  const el = { id: 's', type: 'chart', chartType: 'scatter', mapping: { x: 'x', y: 'y', group: 'g' }, options: { xAxisLabel: 'Size (m²)' } } as any;
+  const rank = ['c', 'a', 'b'];
+  const pts = scatterPoints(el, f, { order: () => (a: string, b: string) => rank.indexOf(a) - rank.indexOf(b) })!;
+  assert.deepEqual(pts.seriesNames, ['c', 'a', 'b']);
+  assert.deepEqual([...pts.series.slice(0, pts.n)], [2, 1, 0], 'each point keeps its own series');
+  assert.deepEqual(scatterPoints(el, f, { groupDate: false })!.seriesNames, ['b', 'a', 'c'], 'no order: as first seen');
+  assert.ok(buildChart(el, f).draw!({ w: 600, h: 400 }).includes('Size (m²)'));
 });

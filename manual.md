@@ -5,8 +5,8 @@ How to use the editor, build reports with an LLM agent, and what's inside the fi
 
 ## The editor
 
-The file opens in the editor. **▶ Preview** hides the chrome and shows the report as a recipient sees it (Esc to
-return).
+The file opens in the editor. **▶ Preview** hides the panes and shows the report as a recipient sees it; **Edit** (or
+Esc) returns.
 
 Clicking a bar, a pie slice or a treemap block filters the rest of the page by its value, and the other marks dim; in the
 editor it also selects the visual. Click it again, click anywhere else or press Esc to let go, and any edit lets go too. The

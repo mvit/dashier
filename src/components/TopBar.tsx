@@ -3,6 +3,8 @@ import { MAC, MOD, openMenuBelow } from './ContextMenu';
 import { store } from '../runtime/store';
 import { Logo, RedoIcon, UndoIcon } from './icons';
 import { PasswordDialog } from './PasswordDialog';
+import { blurOnEnter } from './ui';
+import { parseDoc } from '../runtime/save';
 
 export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }> = (props) => {
   const [notification, setNotification] = createSignal('');
@@ -35,9 +37,9 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const doc = JSON.parse(await file.text());
-        if (!Array.isArray(doc.pages) || !doc.pages.length) throw new Error('The file contains no report pages');
-        store.importDoc({ sources: {}, ...doc });
+        const doc = parseDoc(await file.text());
+        if (!doc) throw new Error('The file contains no report pages');
+        store.importDoc(doc);
         notify(`Opened ${file.name}`);
       } catch (err: any) {
         notify(`Not a dashboard JSON: ${err.message}`);
@@ -71,14 +73,14 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
           // the whole title, however long: the field is as wide as its text (up to the space the bar has)
           size={Math.max(8, (store.doc.title || '').length + 1)}
           onInput={(e) => store.setTitle(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          onKeyDown={blurOnEnter}
           title={store.preview() ? 'Dashboard title' : 'Rename dashboard'}
         />
       </div>
 
       <div class="ed-group ed-group-right">
         <Show when={!store.preview()} fallback={
-          <button class="btn-primary" title="Back to the editor (Esc)" onClick={() => store.setPreview(false)}>Done</button>
+          <button class="btn-primary" title="Edit this report (Esc)" onClick={() => store.setPreview(false)}>Edit</button>
         }>
         <div class="ed-btn-cluster">
           <button class="ed-btn ed-btn-icon" title={`Undo (${MOD}Z)`} disabled={!store.canUndo()} onClick={() => store.undo()}><UndoIcon /></button>

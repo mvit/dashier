@@ -8,6 +8,8 @@ import { fieldStats } from '../runtime/charts';
 import { frameRows, tableFrame } from '../runtime/frames';
 import { FieldType } from '../types/model';
 import { DataGrid } from './DataGrid';
+import { Err } from './ui';
+import { plural } from '../runtime/data';
 
 /** Rows parsed for the preview (and for guessing the column types). */
 const PREVIEW = 100;
@@ -15,8 +17,6 @@ const PREVIEW = 100;
 /** A table name: lower case letters (any alphabet), digits and _ (a dot would read as "table.field"). */
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, '_').replace(/^_|_$/g, '') || 'table';
 const taken = (id: string) => Object.hasOwn(store.doc.sources, id);
-
-const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
 const unique = (base: string) => {
   let n = base;
@@ -157,6 +157,23 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
           : "Import a CSV or JSON table. Its data is saved with the report."
       }
       onClose={props.onClose}
+      ok={busy() ? 'Importing…' : !props.replaceId ? 'Import' : ready() && diff().missing.length ? 'Replace anyway' : 'Replace data'}
+      okOff={!!busy() || !ready() || !name().trim()}
+      onOk={load}
+      foot={
+        <Show when={source() !== 'none' && busy()}>
+          {(b) => (
+            <div class="d-load-progress">
+              {b().text}
+              <Show when={b().share != null}>
+                <div class="d-load-bar">
+                  <i style={{ width: `${Math.round(b().share! * 100)}%` }} />
+                </div>
+              </Show>
+            </div>
+          )}
+        </Show>
+      }
       onDragOver={(e) => {
         if (!e.dataTransfer?.types.includes('Files')) return;
         e.preventDefault();
@@ -269,28 +286,7 @@ export const AddDataDialog: Component<{ onClose: () => void; replaceId?: string 
           </Show>
         </Show>
 
-        <Show when={error()}>
-          <div class="d-form-error">{error()}</div>
-        </Show>
-      </div>
-
-      <div class="modal-footer">
-        <Show when={source() !== 'none' && busy()}>
-          {(b) => (
-            <div class="d-load-progress">
-              {b().text}
-              <Show when={b().share != null}>
-                <div class="d-load-bar">
-                  <i style={{ width: `${Math.round(b().share! * 100)}%` }} />
-                </div>
-              </Show>
-            </div>
-          )}
-        </Show>
-        <button class="btn-secondary" onClick={props.onClose}>Cancel</button>
-        <button class="btn-primary" disabled={!!busy() || !ready() || !name().trim()} onClick={load}>
-          {busy() ? 'Importing…' : !props.replaceId ? 'Import' : ready() && diff().missing.length ? 'Replace anyway' : 'Replace data'}
-        </button>
+        <Err text={error()} />
       </div>
     </Modal>
   );

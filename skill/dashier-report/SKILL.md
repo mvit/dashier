@@ -306,8 +306,8 @@ Visual craft:
 
 - Anchor charts, cards, tables and matrices on the **fact** (`sourceId: "fact_sales"`) and use dimension
   attributes as `"dim_store.region"`. That is what makes slicers on dimensions filter them.
-- A currency measure writes "$" on axes and labels by itself; name other units in the title or `yAxisLabel`
-  ("units", "score, 1 to 5", "EUR"). Sort bars by value unless the axis is time.
+- A currency measure writes the report's currency symbol on axes and labels by itself; name other units in the
+  title or `yAxisLabel` ("units", "score, 1 to 5"). Sort bars by value unless the axis is time.
 - One color per series, consistent across pages: series take palette colors in order, and a sankey's nodes by
   their place in their column, so the same members in the same (`sortBy`) order get the same color in every
   chart. Avoid more than 6 series
@@ -406,8 +406,8 @@ largest member, a latest value); type the ones that don't:
 - Filters, chained: `upper lower title truncate:n round:n format:"percent" date:"MMM d, yyyy"` (tokens `yyyy yy
   MMMM MMM MM M dddd ddd dd d`) `default:"n/a" join:", " first first:n last size sort sort:"field" reverse`.
   `round` and `format` work on raw numbers: bind without `format` to use them.
-- `currency` already writes `$`: don't type one before it. For exact or non-US amounts, bind with `number` or
-  `integer` and write the unit yourself ("{{ rev }} EUR").
+- `currency` already writes the currency's symbol: don't type one before it. Set the document's `currency` for
+  money not in dollars (USD, EUR, JPY, GBP, CNY, AUD, CAD, CHF, HKD, SGD); other currencies: bind with `number` or `integer` and write the unit ("{{ rev }} INR").
 - Words that depend on the data ("up", "a record") can't be computed. Write neutrally ("{{ yoy }} vs 2024"), and
   read each sentence with a negative value too: "a gap of {{ gap }}" is wrong when the stores are ahead ("{{ gap }}
   versus plan" holds both ways).
@@ -707,17 +707,17 @@ All elements: `id` (unique), `type`, `x` 0..11, `y`, `w` 1..12 (x + w ≤ 12), `
 
 - **chart:** `chartType` bar | hbar | line | area | combo | scatter | pie | donut | radar | treemap | sankey | gauge.
   `mapping` x (category; sankey source; treemap leaf), y (value), group (series; sankey target; treemap parent),
-  line (combo), detail (scatter points). `summary: {aggregate, showAs (percent-of-total | running-total),
-  compare}` for y, `lineSummary` (the same, for a combo's line), `xSummary`, `dateParts: {x: "month"}`. `options`: title, showLegend, legendPosition
+  line (combo), detail (scatter points). `summary: {aggregate, showAs (percent-of-total | running-total | ytd | moving-average),
+  compare}` for y, `lineSummary` (the same, for a combo's line), `xSummary`, `dateParts: {x: "month"}`. `options`: showLegend, legendPosition
   (bottom | top | right | left), showValues, yAxisLabel, xAxisLabel, min, max, format, units, sort (value-desc |
   value-asc | label), topN, stack (stacked | percent; lines take percent only); the look: valueAxis / categoryAxis /
   gridlines (false hides), colors (`{"Services": "#ef4444"}`, by series, slice or category name), varyColors,
   barWidth (0.2 to 1), barRadius, lineWidth, markers, donutHole, and refLines (`[{"stat": "average"}]`,
   `[{"value": 400000000000, "label": "Target"}]`: dashed, labelled with the value).
 - **card:** `aggregation: {method, field}`, `format`, `units`, `callout: {size, color, align}`, `subtitle` (static), `compare: {shift | filters |
-  field, show, label, invert}` (the comparison line), `staticValue` (last resort). min/max/first/last/mode also read text and
+  field, show, label, invert}` (the comparison line). min/max/first/last/mode also read text and
   dates.
-- **table:** `columns: [{field, label, align, format (number | integer | currency | percent; date and string leave
+- **table:** `columns: [{field, label, format (number | integer | currency | percent; date and string leave
   values as written), units,
   aggregate, showAs, datePart, cond}]`, `totals`, `grid: {density (compact | roomy), banded, lines (both | none),
   textSize}`. Any aggregated column groups the table by the others.
@@ -731,7 +731,7 @@ All elements: `id` (unique), `type`, `x` 0..11, `y`, `w` 1..12 (x + w ≤ 12), `
 Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`, `text`, `muted`, `border`,
 `accent`, `positive` and `negative` (a comparison's good and bad news, set to suit the theme's colors), `palette`
 [8 colors], `font`, `radius`), `canvas` (`{"width": 1440, "height": 810}`; portrait
-`1080×1440`, A4 `1123×794`), `filters` (every page), `relationships`, `measures`, `pages` (`id`, `title`,
+`1080×1440`, A4 `1123×794`), `currency` (every `currency` format's: USD, EUR, JPY, GBP, CNY, AUD, CAD, CHF, HKD, SGD; default USD), `filters` (every page), `relationships`, `measures`, `pages` (`id`, `title`,
 `elements`, `filters`). `report.html#<page id>` opens a page; `#preview` hides the editor; `#fit` fits the page to the window (`#preview,fit` for a report embedded in a frame).
 
 ## Gotchas

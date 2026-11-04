@@ -1,7 +1,7 @@
 import { Component, For, Show, createMemo, createSignal } from 'solid-js';
 import { isBlank } from '../runtime/data';
 import { ColumnSchema, FieldType, isNumericType } from '../types/model';
-import { Select } from './ui';
+import { Select, blurOnEnter } from './ui';
 
 /** Column types as Power Query shows them: a short glyph and a name. */
 const TYPES: Record<FieldType, [string, string]> = {
@@ -73,16 +73,19 @@ export const DataGrid: Component<{
                         title="Rename column throughout the report"
                         spellcheck={false}
                         onChange={(e) => props.onRename!(c.name, e.currentTarget)}
-                        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                        onKeyDown={blurOnEnter}
                       />
                     </Show>
                   </div>
                   <Show when={props.onSortBy}>
                     <div class="d-col-profile">
-                      <select class="d-sortby" title="Sort this field by another column throughout the report" onChange={(e) => props.onSortBy!(c.name, e.currentTarget.value)}>
-                        <option value="">sorted by itself</option>
-                        <For each={props.columns.filter(o => o.name !== c.name)}>{(o) => <option value={o.name} selected={c.sortBy === o.name}>sorted by {o.name}</option>}</For>
-                      </select>
+                      <Select
+                        class="d-sortby"
+                        title="Sort this field by another column throughout the report"
+                        value={c.sortBy ?? ''}
+                        options={[['', 'sorted by itself'], ...props.columns.filter((o) => o.name !== c.name).map((o): [string, string] => [o.name, `sorted by ${o.name}`])]}
+                        set={(v) => props.onSortBy!(c.name, v)}
+                      />
                     </div>
                   </Show>
                 </th>

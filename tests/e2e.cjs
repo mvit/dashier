@@ -67,9 +67,9 @@ const openFile = async (p, file) => {
     await page.waitForSelector(tiles);
     await page.waitForSelector('#d-splash', { hidden: true });
   };
-  // #preview opens the sheet without any editor chrome
+  // #preview opens the same preview as the editor's button: the top bar with Edit, no panes
   await open('#preview');
-  check('#preview hides all editor chrome', !!(await page.$('.mode-preview')) && !(await page.$('.ed-topbar')) && !(await page.$('.d-visualizations-pane')) && !(await page.$('.d-filters-pane')));
+  check('#preview shows the report with the top bar and its Edit button, no panes', !!(await page.$('.mode-preview')) && (await page.$$eval('.ed-topbar button', (b) => b.some((x) => x.textContent.trim() === 'Edit'))) && !(await page.$('.d-visualizations-pane')) && !(await page.$('.d-filters-pane')));
   check('renders 7 visuals', (await page.$$(tiles)).length === 7);
   await page.waitForSelector('.d-chart-svg svg');
   check('the bar and line charts are drawn', (await page.$$('.d-chart-svg svg')).length >= 2);
@@ -154,9 +154,9 @@ const openFile = async (p, file) => {
   await page.$$eval('.ed-topbar button', (b) => b.find((x) => /Preview/.test(x.textContent)).click());
   await page.waitForSelector('.mode-preview');
   check('Preview hides the panes and keeps the top bar, its title read-only', !(await page.$('.d-visualizations-pane')) && !!(await page.$('.ed-title[readonly]')));
-  await page.$$eval('.ed-topbar button', (b) => b.find((x) => x.textContent.trim() === 'Done').click());
+  await page.$$eval('.ed-topbar button', (b) => b.find((x) => x.textContent.trim() === 'Edit').click());
   await page.waitForSelector('.mode-edit');
-  check('Done returns to the editor', !!(await page.$('.d-visualizations-pane')));
+  check('Edit returns to the editor', !!(await page.$('.d-visualizations-pane')));
 
   // click to filter: in preview a bar filters the rest of the page, and only a mark does
   await open('#preview');
@@ -175,6 +175,50 @@ const openFile = async (p, file) => {
   await page.keyboard.press('Escape');
   await sleep(200);
   check('Esc lets go of the pick first, and stays in preview', (await kpis()) === whole && !!(await page.$('.mode-preview')));
+
+  // a chart's numbers as a table: from its menu, or Enter on it with the keyboard
+  const barChart = await page.$('.d-visual-container[data-type="chart"]:has(.c-bars)');
+  const bb = await barChart.boundingBox();
+  await page.mouse.click(bb.x + bb.width / 2, bb.y + 10, { button: 'right' });
+  await sleep(150);
+  await page.$$eval('.d-context-menu button', (b) => b.find((x) => x.textContent.trim() === 'Show as table').click());
+  await page.waitForSelector('.d-data-table .d-matrix');
+  const dataTable = await page.$eval('.d-data-table', (d) => ({ rows: d.querySelectorAll('.d-matrix tbody tr:not(.d-spacer)').length, foot: d.querySelector('.d-matrix tfoot')?.textContent ?? '', export: [...d.querySelectorAll('button')].some((b) => b.textContent.includes('Export as CSV')) }));
+  check('Show as table lists the chart\'s categories, a total and an export', dataTable.rows > 1 && dataTable.foot.includes('Total') && dataTable.export, JSON.stringify(dataTable));
+  await page.keyboard.press('Escape');
+  await sleep(150);
+  check('…and Esc closes it', !(await page.$('.d-data-table')));
+  await barChart.focus();
+  await page.keyboard.press('Enter');
+  await sleep(200);
+  check('a chart reached by the keyboard opens its table with Enter', !!(await page.$('.d-data-table .d-matrix')));
+  // its CSV: the file's text, caught as the download is made
+  const csvOf = async () => {
+    await page.evaluate(() => {
+      const make = URL.createObjectURL;
+      window.__csv = null;
+      URL.createObjectURL = (b) => (b.text().then((t) => (window.__csv = t)), make(b));
+    });
+    await page.$$eval('.d-data-table button', (b) => b.find((x) => x.textContent.includes('Export as CSV')).click());
+    await page.waitForFunction(() => window.__csv != null);
+    return (await page.evaluate(() => window.__csv)).split('\n');
+  };
+  const chartCsv = await csvOf();
+  check('…and exports it as CSV: a header, the categories, then the totals', chartCsv.length > 2 && chartCsv.at(-1).startsWith('Total,'), chartCsv.slice(0, 2).join(' / '));
+  await page.keyboard.press('Escape');
+  await sleep(150);
+  // a table shows as itself, at full size, with every row in its CSV
+  const tableTile = await page.$('.d-visual-container[data-type="table"]');
+  const tb = await tableTile.boundingBox();
+  await page.mouse.click(tb.x + tb.width / 2, tb.y + 10, { button: 'right' });
+  await sleep(150);
+  await page.$$eval('.d-context-menu button', (b) => b.find((x) => x.textContent.trim() === 'Show as table').click());
+  await page.waitForSelector('.d-data-table .d-table');
+  const tableCsv = await csvOf();
+  const drawnHeads = await page.$$eval('.d-data-table .d-table thead th', (t) => t.map((x) => x.textContent.replace(/[▲▼]/g, '').trim()).join(','));
+  check('a table shows as a table too, and its CSV has its headers and rows', tableCsv.length > 1 && tableCsv[0] === drawnHeads, `${tableCsv[0]} | ${drawnHeads} | ${tableCsv.length} lines`);
+  await page.keyboard.press('Escape');
+  await sleep(150);
   await open();
   await page.waitForSelector('.c-bars rect');
   await page.click('.c-bars rect');
@@ -717,7 +761,7 @@ const openFile = async (p, file) => {
   check('dropping a field binds its sum, a table its row count', (await boxText()) === 'Revenue 489.1K, rows 4, Operations & Analytics Hub', await boxText());
   // the summary and format are set from the field's menu, not in the template
   await pickMenu('.d-slots .d-pill', 'Average');
-  await pickMenu('.d-slots .d-pill', 'Currency ($)');
+  await pickMenu('.d-slots .d-pill', 'Currency');
   await waitText('$122,275');
   check('the field menu sets the aggregation and format', (await boxText()) === 'Revenue $122,275, rows 4, Operations & Analytics Hub', await boxText());
   const bound = await slots();
@@ -1172,7 +1216,7 @@ const openFile = async (p, file) => {
   const sheet = () => page.$eval('.d-canvas-sheet', (e) => getComputedStyle(e).backgroundColor);
   const chrome0 = await chrome(), sheet0 = await sheet();
   const reportCards = await page.$$eval('.d-visualizations-pane .d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent));
-  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size' && !!(await page.$('.d-visualizations-pane .d-ftools .btn-secondary')), reportCards.join());
+  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size,Numbers' && !!(await page.$('.d-visualizations-pane .d-ftools .btn-secondary')), reportCards.join());
   await fpick('Colors', 'Appearance', 'Dark');
   await sleep(100);
   check('a dark base restyles the report', (await sheet()) !== sheet0, `${sheet0} → ${await sheet()}`);
@@ -1197,7 +1241,18 @@ const openFile = async (p, file) => {
   await shapeSelect.select('16:9');
   await sleep(50);
   check('…and back', (await canvasSize()) === '1440x810', await canvasSize());
-
+  // the report's currency: every currency format follows it, and Undo puts it back
+  const money = () => page.$$eval('.card-value', (cs) => cs.map((c) => c.textContent).join(' | '));
+  const dollars = await money();
+  check('the currency choices are the ten most traded', (await foptions('Numbers', 'Currency')).length === 10, (await foptions('Numbers', 'Currency')).join());
+  await fpick('Numbers', 'Currency', 'EUR (€)');
+  await sleep(150);
+  const euros = await money();
+  check('a report in euros shows its amounts in euros', dollars.includes('$') && euros.includes('€') && !euros.includes('$'), `${dollars} → ${euros}`);
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+  await sleep(150);
+  check('…and Undo brings dollars back', (await money()) === dollars, await money());
   // ── save → reload ───────────────────────────────────────────────────────────
   await page.keyboard.down('Control'); await page.keyboard.press('s'); await page.keyboard.up('Control');
   let saved;

@@ -5,11 +5,12 @@ import { reportStyle } from '../runtime/theme';
 import { view, clampZoom, observeSize } from '../runtime/view';
 import { Widget, cell, sheetStyle } from './Widget';
 import { MOD, MenuEntry, openMenu } from './ContextMenu';
-import { Card } from './ui';
-import { ClearFilterIcon } from './icons';
+import { Rename, PickCard } from './ui';
+
 import { pinching } from '../runtime/tooltip';
-import { pickSummary } from '../runtime/data';
+import { pickSummary, flipped } from '../runtime/data';
 import { datePartLabel } from '../runtime/dates';
+import { DataTableDialog, tabular } from './DataTableDialog';
 
 // Must match .d-visuals-grid in theme.css
 const ROW_H = 85;
@@ -37,9 +38,9 @@ export const Canvas: Component = () => {
   let gridRef: HTMLDivElement | undefined;
   const currentPage = () => store.getActivePage() || store.doc.pages[0];
   const [editingPageId, setEditingPageId] = createSignal<string | null>(null);
-  const [pageTitleInput, setPageTitleInput] = createSignal('');
   const [dragging, setDragging] = createSignal(false);
-
+  // the visual whose numbers show as a table (its menu, or Enter on it)
+  const [asTable, setAsTable] = createSignal<DashElement | null>(null);
   // --- Zoom & pan ---
   // The sheet is always laid out at the document's fixed size and scaled as a whole; it never reflows to the window.
   let scrollRef!: HTMLDivElement;
@@ -194,6 +195,8 @@ export const Canvas: Component = () => {
     };
     const start = { ...at(e), x: elem.x, y: elem.y, w: elem.w, h: elem.h };
     const pageId = currentPage().id;
+    // the page as the drag began: what the visual lands on moves out of its way, and back when it's passed
+    const before = currentPage().elements.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
     const key = `drag:${Date.now()}`;
 
     track(e, (ev) => {
@@ -219,7 +222,7 @@ export const Canvas: Component = () => {
         }
       }
       setDragging(true);
-      store.moveResizeElement(pageId, elem.id, x, y, w, h, key);
+      store.moveResizeElement(pageId, elem.id, x, y, w, h, key, before);
     }, (pinched) => {
       setDragging(false);
       // what the first finger moved before the second landed wasn't a drag: it goes back, and leaves no history
@@ -227,9 +230,9 @@ export const Canvas: Component = () => {
     });
   };
 
-  const finishRenamePage = () => {
+  const finishRenamePage = (input?: string) => {
     const id = editingPageId();
-    const title = pageTitleInput().trim();
+    const title = input?.trim();
     if (id && title) store.renamePage(id, title);
     setEditingPageId(null);
   };
@@ -258,16 +261,15 @@ export const Canvas: Component = () => {
   ];
 
   // On a phone the page's slicers live in a drawer, opened from a button at the top (theme.css shows the button, and
-  // hides the slicers in the page, only there): a card each, as filters are, saying what's picked; a lone one starts open.
+  // hides the slicers in the page, only there): a card each, as filters are, saying what's picked.
   const slicers = () => (currentPage()?.elements.filter(e => e.type === 'slicer') ?? []) as SlicerElement[];
   const [drawer, setDrawer] = createSignal(false);
   const [opened, setOpened] = createSignal(new Set<string>());
-  const flipSlicer = (id: string) => setOpened(o => (o.has(id) ? (o.delete(id), new Set(o)) : new Set(o.add(id))));
+  const flipSlicer = (id: string) => setOpened((o) => flipped(o, id));
 
   const startRenamePage = (page: DashPage) => {
     if (!store.editing()) return;
     setEditingPageId(page.id);
-    setPageTitleInput(page.title);
   };
 
   return (
@@ -316,10 +318,22 @@ export const Canvas: Component = () => {
                         if (!(e.target as HTMLElement).closest('.d-chart-plot')) store.clearPick();
                         if (store.editing()) store.setSelectedElementId(elem.id);
                       }}
+                      // a visual is a stop for the keyboard: Enter shows its numbers as a table, or selects it in the editor
+                      tabIndex={0}
+                      role="figure"
+                      aria-label={(elem as any).title || elem.type}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget || e.key !== 'Enter') return;
+                        if (tabular(elem)) setAsTable(elem);
+                        else if (store.editing()) store.setSelectedElementId(elem.id);
+                      }}
                       onContextMenu={(e) => {
-                        if (!store.editing()) return;
+                        const table = tabular(elem) ? [{ label: 'Show as table', onSelect: () => setAsTable(elem) }] : [];
+                        if (!store.editing()) return table.length && openMenu(e, table);
                         store.setSelectedElementId(elem.id);
                         openMenu(e, [
+                          ...table,
+                          ...(table.length ? (['-'] as const) : []),
                           { label: 'Duplicate', kbd: `${MOD}D`, onSelect: duplicate },
                           '-',
                           { label: 'Delete', kbd: 'Del', danger: true, onSelect: remove }
@@ -365,26 +379,16 @@ export const Canvas: Component = () => {
           <div class="d-drawer" style={reportStyle(store.reportTheme())} onClick={(e) => e.stopPropagation()}>
             <For each={slicers()}>
               {(elem) => (
-                <Card
-                  class={`d-fsec d-filter-card ${elem.selection ? 'active' : ''}`}
-                  open={opened().has(elem.id) !== (slicers().length === 1)}
+                <PickCard
+                  class="d-fsec"
+                  open={opened().has(elem.id)}
                   flip={() => flipSlicer(elem.id)}
-                  title={
-                    <>
-                      <span class="filter-name">{elem.title || elem.field}</span>
-                      <span class="filter-type">{pickSummary(elem.selection, (v) => datePartLabel(v, elem.datePart), () => store.slicerOptions(elem).values.length)}</span>
-                    </>
-                  }
-                  actions={
-                    <Show when={elem.selection}>
-                      <button class="d-filter-x" title="Clear selection" onClick={() => store.setSlicerSelection(currentPage().id, elem.id, undefined)}>
-                        <ClearFilterIcon />
-                      </button>
-                    </Show>
-                  }
+                  name={elem.title || elem.field}
+                  summary={pickSummary(elem.selection, (v) => datePartLabel(v, elem.datePart), () => store.slicerOptions(elem).values.length)}
+                  clear={['Clear selection', () => store.setSlicerSelection(currentPage().id, elem.id, undefined)]}
                 >
                   <Widget element={elem} />
-                </Card>
+                </PickCard>
               )}
             </For>
           </div>
@@ -419,18 +423,7 @@ export const Canvas: Component = () => {
                   when={editingPageId() === page.id}
                   fallback={<span class="tab-title">{page.title}</span>}
                 >
-                  <input
-                    type="text"
-                    class="d-tab-rename-input"
-                    value={pageTitleInput()}
-                    onInput={(e) => setPageTitleInput(e.currentTarget.value)}
-                    onBlur={finishRenamePage}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') finishRenamePage();
-                      if (e.key === 'Escape') setEditingPageId(null);
-                    }}
-                    ref={(el) => setTimeout(() => el.select())}
-                  />
+                  <Rename class="d-tab-rename-input" value={page.title} done={finishRenamePage} />
                 </Show>
               </div>
             )}
@@ -444,6 +437,7 @@ export const Canvas: Component = () => {
           </button>
         </Show>
       </footer>
+      <Show when={asTable()}>{(el) => <DataTableDialog element={el()} onClose={() => setAsTable(null)} />}</Show>
     </div>
   );
 };

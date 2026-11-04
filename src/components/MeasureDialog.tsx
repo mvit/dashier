@@ -2,10 +2,11 @@ import { Component, For, Index, Show, createMemo, createSignal } from 'solid-js'
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
 import { FORMAT_CHOICES, UNIT_CHOICES } from './FieldWell';
-import { Check, Seg, Select } from './ui';
+import { Seg, Select, Err, CheckList } from './ui';
 import { formatValue, summaryLabel, SUMMARY_NAMES, withUnits } from '../runtime/charts';
 import { OPS, compileMeasure, measureError, measureFormat, wheres } from '../runtime/measures';
 import { AggregationMethod, DashMeasure, MeasureOp, MeasureOperand, Units, ValueFormat, isNumericType } from '../types/model';
+import { toggled } from '../runtime/data';
 
 const SUMMARIES: AggregationMethod[] = ['sum', 'avg', 'min', 'max', 'count', 'distinct', 'median'];
 
@@ -109,7 +110,16 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
   );
 
   return (
-    <Modal class="d-measure-dialog" title={existing ? 'Edit measure' : 'Create measure'} subtitle={`Table: ${props.table}`} onClose={props.onClose}>
+    <Modal
+      class="d-measure-dialog"
+      title={existing ? 'Edit measure' : 'Create measure'}
+      subtitle={`Table: ${props.table}`}
+      onClose={props.onClose}
+      ok="Save"
+      okOff={!!problem()}
+      onOk={() => done(store.saveMeasure(draft(), props.name))}
+      foot={existing && <button class="btn-secondary d-measure-delete" onClick={remove}>Delete</button>}
+    >
       <div class="modal-body d-measure-body">
         <label class="d-mfield">
           Name
@@ -154,15 +164,7 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
                   <Show when={c().field}>is one of</Show>
                 </div>
                 <Show when={c().field}>
-                  <div class="d-measure-values">
-                    <For each={store.distinct(c().table, c().field).slice(0, 500)}>
-                      {(v) => (
-                        <Check checked={c().values.includes(v)} set={() => setCond(i, { values: c().values.includes(v) ? c().values.filter(x => x !== v) : [...c().values, v] })}>
-                          {v}
-                        </Check>
-                      )}
-                    </For>
-                  </div>
+                  <CheckList class="d-measure-values" values={store.distinct(c().table, c().field)} on={(v) => c().values.includes(v)} flip={(v) => setCond(i, { values: toggled(c().values, v) })} />
                 </Show>
               </>
             )}
@@ -194,17 +196,7 @@ export const MeasureDialog: Component<{ table: string; name?: string; field?: st
         <div class={`d-measure-preview ${problem() ? 'muted' : ''}`}>
           {problem() && name().trim() ? problem() : preview() != null ? <>Result for {props.table}: <b>{preview()}</b></> : 'Choose a field or calculation to preview the result.'}
         </div>
-        <Show when={error()}>
-          <div class="d-form-error">{error()}</div>
-        </Show>
-      </div>
-
-      <div class="modal-footer">
-        <Show when={existing}>
-          <button class="btn-secondary d-measure-delete" onClick={remove}>Delete</button>
-        </Show>
-        <button class="btn-secondary" onClick={props.onClose}>Cancel</button>
-        <button class="btn-primary" disabled={!!problem()} onClick={() => done(store.saveMeasure(draft(), props.name))}>Save</button>
+        <Err text={error()} />
       </div>
     </Modal>
   );

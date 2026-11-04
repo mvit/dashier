@@ -4,6 +4,7 @@ node_modules/
 ._*
 # local Claude Code state
 .claude/
+.agents/
 # large local test data
 customers-*.csv
 *.dashier.html

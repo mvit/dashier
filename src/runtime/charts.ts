@@ -1,10 +1,11 @@
-import { AggregationMethod, ChartElement, ChartOptions, ChartType, Compare, ShowAs, ValueFormat } from '../types/model';
+import { createSignal } from 'solid-js';
+import { AggregationMethod, ChartElement, ChartOptions, Compare, ShowAs, ValueFormat } from '../types/model';
 import { DatePart, datePartKey, datePartLabel, shiftKey } from './dates';
-import { compareText } from './data';
+import { compareText, getOr, blankCell, numberOf } from './data';
 import type { MeasureFn } from './measures';
-import { Frame, blanksOf, codesOf, distinctOf, reader, subset, tableFrame } from './frames';
+import { Frame, blanksOf, distinctOf, reader, subset, tableFrame, perCell } from './frames';
 import type { Area } from './draw/svg';
-import { seriesColor } from './draw/svg';
+import { seriesColor, esc } from './draw/svg';
 import { xyChart } from './draw/xy';
 import { pieChart } from './draw/pie';
 import { radarChart } from './draw/radar';
@@ -22,6 +23,20 @@ const TIERS: [number, string][] = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K
 
 const UNITS: Record<string, [number, string]> = { thousands: [1e3, 'K'], millions: [1e6, 'M'], billions: [1e9, 'B'] };
 
+/** The currencies a report can be in (the ten most traded), the first the default. */
+export const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'AUD', 'CAD', 'CHF', 'HKD', 'SGD'];
+/** The report's currency, for every "currency" format (a signal: what's drawn in it follows a change). */
+const [currency, setCurrency] = createSignal(CURRENCIES[0]);
+export { setCurrency };
+const money = new Map<string, Intl.NumberFormat>();
+/** A formatter in the report's currency, made once per currency and `kind` of options. */
+const cur = (kind: string, o: Intl.NumberFormatOptions) => getOr(money, currency() + kind, () => intl({ style: 'currency', currency: currency(), ...o }));
+/** What goes before a number in the report's currency: "$", "€", "CHF ". */
+const symbol = () => ((p) => p.slice(0, p.findIndex((x) => x.type === 'integer')).map((x) => x.value).join(''))(cur('', WHOLE).formatToParts(1));
+
+/** `n` in display units: divided by `div`, suffixed ("$416.16B"). */
+const inUnit = (n: number, format: string | undefined, div: number, suffix: string | undefined, o: Intl.NumberFormatOptions) =>
+  `${n < 0 ? '-' : ''}${format === 'currency' ? symbol() : ''}${intl(o).format(Math.abs(n) / div)}${suffix}`;
 /** A format with display units, as formatValue reads it ("currency|billions"); `units` wins over the format's own. */
 export const withUnits = (format?: string, units?: string) => {
   const [f, u] = (format ?? '').split('|');
@@ -39,10 +54,10 @@ export function formatValue(val: number | string | null | undefined, fmt?: strin
   const [div, suffix] = (units === 'auto' ? TIERS.find(([t]) => Math.abs(val) >= t * 0.99995) : UNITS[units]) ?? [];
   if (div && format !== 'percent') {
     const k = format === 'integer' ? 0 : 2;
-    return `${val < 0 ? '-' : ''}${format === 'currency' ? '$' : ''}${intl({ minimumFractionDigits: k, maximumFractionDigits: k }).format(Math.abs(val) / div)}${suffix}`;
+    return inUnit(val, format, div, suffix, { minimumFractionDigits: k, maximumFractionDigits: k });
   }
   // cents and less keep two significant digits: $0.004, not $0; prices under $100 keep their cents: $5.86, not $6
-  if (format === 'currency') return (val && Math.abs(val) < 0.5 ? CENTS : Math.abs(val) < 100 && !Number.isInteger(val) ? PRICE : CURRENCY).format(val);
+  if (format === 'currency') return (val && Math.abs(val) < 0.5 ? cur('c', CENTS) : Math.abs(val) < 100 && !Number.isInteger(val) ? cur('p', PRICE) : cur('', WHOLE)).format(val);
   if (format === 'percent') return `${(Math.round(val * 1000) / 10 || 0).toFixed(1)}%`;
   if (format === 'integer') return (Math.round(val) || 0).toLocaleString();
   const a = Math.abs(val);
@@ -56,11 +71,6 @@ export function formatValue(val: number | string | null | undefined, fmt?: strin
  * Reduces `n` numbers read by position (no intermediate arrays except for median, mode and distinct). Returns
  * null when a numeric summary finds nothing numeric.
  */
-/** Nothing in the cell: null, empty or only spaces (which Number() would read as 0). */
-const blankCell = (v: unknown) => v == null || (typeof v === 'string' && !v.trim());
-/** A cell as the number numeric summaries read: NaN for a blank or anything that isn't one. */
-export const numberOf = (v: unknown) => (typeof v === 'number' ? v : blankCell(v) ? NaN : Number(v));
-
 export function summarizeRead(n: number, read: (k: number) => unknown, method: AggregationMethod = 'sum'): number | null {
   if (method === 'count') return n;
   if (method === 'distinct') {
@@ -100,8 +110,7 @@ export function summarizeRead(n: number, read: (k: number) => unknown, method: A
     case 'min': return min;
     case 'max': return max;
     case 'first': return first;
-    case 'last':
-    case 'latest': return last;
+    case 'last': return last;
     case 'mode': return top;
     case 'var': return count > 1 ? m2 / (count - 1) : null;
     case 'stdev': return count > 1 ? Math.sqrt(m2 / (count - 1)) : null;
@@ -115,7 +124,7 @@ export function summarizeRead(n: number, read: (k: number) => unknown, method: A
 }
 
 /** Summaries that read any value: of text alphabetically (naturally), of dates earliest to latest. */
-const ANY_VALUE = new Set<AggregationMethod>(['min', 'max', 'mode', 'first', 'last', 'latest']);
+const ANY_VALUE = new Set<AggregationMethod>(['min', 'max', 'mode', 'first', 'last']);
 
 /**
  * Like summarizeRead, for a single value on show (a card, a text box variable, a table or matrix cell): there,
@@ -138,7 +147,7 @@ export function summarizeValue(n: number, read: (k: number) => unknown, method: 
       const c = (counts.get(s) ?? 0) + 1;
       counts.set(s, c);
       if (c > most) (most = c), (out = s);
-    } else if (out === null || method === 'last' || method === 'latest' || (method === 'min' ? compareText(s, out) < 0 : method === 'max' && compareText(s, out) > 0)) out = s;
+    } else if (out === null || method === 'last' || (method === 'min' ? compareText(s, out) < 0 : method === 'max' && compareText(s, out) > 0)) out = s;
     if (method === 'first') break;
   }
   return out;
@@ -161,6 +170,16 @@ export function aggregate(frame: Frame, method: AggregationMethod = 'sum', field
   return read ? summarizeRead(frame.length, read, method) : null;
 }
 
+/**
+ * A value over positions of `frame`, as a matrix cell or a table's grouped row shows it: measure `fn` worked out on
+ * those rows, else `field` summarized (text and dates read too). Nothing over no rows.
+ */
+export function valueOver(frame: Frame, field: string, method: AggregationMethod = 'sum', fn?: MeasureFn | null) {
+  const read = reader(frame, field);
+  return (pos: ArrayLike<number>) =>
+    !pos.length ? null : fn ? fn(subset(frame, Int32Array.from(pos))) : method === 'count' ? pos.length : read ? summarizeValue(pos.length, (i) => read(pos[i]), method) : null;
+}
+
 /** A field over a frame's rows as a single value on show: as `aggregate`, but min, max, mode, first and last read text and dates too. */
 export function aggregateValue(frame: Frame, method: AggregationMethod = 'sum', field?: string): number | string | null {
   if (method === 'count' || !field) return frame.length;
@@ -170,7 +189,7 @@ export function aggregateValue(frame: Frame, method: AggregationMethod = 'sum', 
 
 export const SUMMARY_NAMES: Record<AggregationMethod, string> = {
   sum: 'Sum', avg: 'Average', min: 'Minimum', max: 'Maximum', count: 'Count', distinct: 'Count (Distinct)', median: 'Median',
-  mode: 'Most common', first: 'First', last: 'Last', latest: 'Last', stdev: 'Standard deviation', var: 'Variance'
+  mode: 'Most common', first: 'First', last: 'Last', stdev: 'Standard deviation', var: 'Variance'
 };
 
 /** True for a value shown as a share of its grand total. */
@@ -179,7 +198,7 @@ export const pct = (s?: ShowAs) => s === 'percent-of-total';
 /** A value's name as shown: "%GT Revenue", "Revenue, running total", "Revenue, last year", "Revenue, % vs last year". */
 export function valueLabel(name: string, showAs?: ShowAs, c?: Compare): string {
   const other = c && (c.label ?? (c.shift === 'year' ? 'last year' : c.shift ? 'previous period' : c.field ?? 'other'));
-  return (pct(showAs) ? '%GT ' : '') + name + (c ? (c.show === 'value' ? `, ${other}` : `, ${c.show ? 'change' : '%'} vs ${other}`) : '') + (showAs === 'running-total' ? ', running total' : '');
+  return (pct(showAs) ? '%GT ' : '') + name + (c ? (c.show === 'value' ? `, ${other}` : `, ${c.show ? 'change' : '%'} vs ${other}`) : '') + (showAs ? ALONG_NAMES[showAs] ?? '' : '');
 }
 
 /** The display name of a summarized field: "Sum of revenue", "%GT Sum of revenue". */
@@ -187,19 +206,14 @@ export function summaryLabel(field: string, method?: AggregationMethod, showAs?:
   return method ? valueLabel(`${SUMMARY_NAMES[method]} of ${field}`, showAs, c) : field;
 }
 
-const KINDS = ['bar', 'hbar', 'line', 'area', 'combo', 'scatter', 'pie', 'donut', 'radar', 'treemap', 'sankey', 'gauge'];
-/** Maps unknown chart types (and the old "column") onto the ones Dashier draws. */
-export const chartKind = (t: string): ChartType => (KINDS.includes(t) ? (t as ChartType) : 'bar');
-
 /** A chart's number format: a value format, or 'share' for percent-of-total values (already 0–100). */
 export type ChartFormat = ValueFormat | 'share' | undefined;
 /** Charts write their own compact numbers: a format's display units don't apply. */
 const unitless = (f?: string) => f?.split('|')[0] as ChartFormat;
 
 const intl = (o: Intl.NumberFormatOptions) => new Intl.NumberFormat('en-US', o);
-const CURRENCY = intl({ style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const CENTS = intl({ style: 'currency', currency: 'USD', maximumSignificantDigits: 2 });
-const PRICE = intl({ style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
+// in the report's currency: whole amounts, cents and less (two significant digits), prices under 100 (with cents)
+const WHOLE = { maximumFractionDigits: 0 }, CENTS = { maximumSignificantDigits: 2 }, PRICE = { minimumFractionDigits: 2 };
 const FULL = intl({ maximumFractionDigits: 2 });
 const FINE = intl({ maximumSignificantDigits: 3 });
 const compact = new Map<string, Intl.NumberFormat>();
@@ -207,7 +221,7 @@ const compact = new Map<string, Intl.NumberFormat>();
 /** Exact, for tooltips: $124,501 · 124,500.5 · 0.00412 · 12.3%. */
 export function formatFull(n: number, fm?: ChartFormat): string {
   const f = unitless(fm);
-  return f === 'share' ? `${n.toFixed(1)}%` : f === 'percent' ? `${(n * 100).toFixed(1)}%` : f === 'currency' ? CURRENCY.format(n) : f === 'integer' ? Math.round(n).toLocaleString('en-US') : (Math.abs(n) < 1 ? FINE : FULL).format(n);
+  return f === 'share' ? `${n.toFixed(1)}%` : f === 'percent' ? `${(n * 100).toFixed(1)}%` : f === 'currency' ? cur('', WHOLE).format(n) : f === 'integer' ? Math.round(n).toLocaleString('en-US') : (Math.abs(n) < 1 ? FINE : FULL).format(n);
 }
 
 /** Short, for axes and data labels: $250K · 1.2M · 25%, with up to `digits` decimals (labels: 3 significant digits under 1,000). */
@@ -216,13 +230,13 @@ export function formatCompact(n: number, fm?: ChartFormat, digits?: number): str
   if (f === 'share' || f === 'percent') return `${+(f === 'share' ? n : n * 100).toFixed(digits ?? 1) || 0}%`;
   // fixed display units: every number in them ($1.2M, $0.4M, $12.5M), labels to 3 significant digits
   const [div, suffix] = UNITS[(fm ?? '').split('|')[1]] ?? [];
-  if (div) return `${n < 0 ? '-' : ''}${f === 'currency' ? '$' : ''}${intl(digits === undefined ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: digits }).format(Math.abs(n) / div)}${suffix}`;
+  if (div) return inUnit(n, f, div, suffix, digits === undefined ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: digits });
   // a data label (no digits asked for) under 1,000 keeps 3 significant digits: $7.46, 67.1, 225; axis ticks ask for theirs
   const sig = digits === undefined && Math.abs(n) < 999.5;
-  const key = (f === 'currency' ? '$' : '') + (sig ? 's' : digits ?? 1);
+  const key = (f === 'currency' ? currency() : '') + (sig ? 's' : digits ?? 1);
   let nf = compact.get(key);
   if (!nf)
-    compact.set(key, (nf = intl({ notation: 'compact', ...(sig ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: digits ?? 1 }), ...(f === 'currency' && { style: 'currency', currency: 'USD' }) })));
+    compact.set(key, (nf = intl({ notation: 'compact', ...(sig ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: digits ?? 1 }), ...(f === 'currency' && { style: 'currency', currency: currency() }) })));
   return nf.format(n);
 }
 
@@ -258,27 +272,16 @@ export function reducer(frame: Frame, y: string | MeasureFn, method: Aggregation
 /** Each frame row's key, as an index into `names` (first-seen order; a blank is named `blank`). Each distinct value is named once. */
 export function keyIndex(frame: Frame, key: Key, blank = '(Blank)') {
   const { field, part } = typeof key === 'string' ? { field: key, part: undefined } : key;
-  const read = reader(frame, field) ?? (() => undefined);
-  // a dictionary column's rows are told apart by code (−1, no row, is slot 0), others by value
-  const d = codesOf(frame, field), perCode = new Int32Array(d ? d.words.length + 1 : 0).fill(-1);
   const names: string[] = [], byValue = new Map<unknown, number>(), byName = new Map<string, number>();
   const name = (v: unknown) => {
     const s = part ? datePartKey(String(v ?? ''), part) : v;
     const n = s == null || s === '' ? blank : String(s);
-    return byName.get(n) ?? byName.set(n, names.push(n) - 1).get(n)!;
+    return getOr(byName, n, () => names.push(n) - 1);
   };
+  // a dictionary column's rows are named once per word, others once per value
+  const id = perCell(frame, field, (v) => getOr(byValue, v, () => name(v))) ?? (() => name(undefined));
   const at = new Int32Array(frame.length);
-  for (let k = 0; k < frame.length; k++) {
-    if (d) {
-      const c = d.code(k) + 1;
-      at[k] = perCode[c] >= 0 ? perCode[c] : (perCode[c] = name(c ? d.words[c - 1] : null));
-    } else {
-      const v = read(k);
-      let i = byValue.get(v);
-      if (i === undefined) byValue.set(v, (i = name(v)));
-      at[k] = i;
-    }
-  }
+  for (let k = 0; k < frame.length; k++) at[k] = id(k);
   return { names, at };
 }
 
@@ -308,15 +311,12 @@ export function pivot(frame: Frame, x: Key, y: string | MeasureFn, group?: Key, 
     return v == null ? 0 : ((any = true), v);
   };
   const groups = new Map<string, Map<string, number>>();
-  const cellsOf = (g: string) => groups.get(g) ?? groups.set(g, new Map()).get(g)!;
+  const cellsOf = (g: string) => getOr(groups, g, () => new Map<string, number>());
   if (ser) {
     // a cell is an (x, group) pair, numbered in first-seen order
     const nc = cat.names.length, ids = new Map<number, number>(), cell = new Int32Array(frame.length), cc: number[] = [], cg: number[] = [];
     for (let k = 0; k < frame.length; k++) {
-      const key = ser.at[k] * nc + cat.at[k];
-      let j = ids.get(key);
-      if (j === undefined) ids.set(key, (j = cc.push(cat.at[k]) - 1)), cg.push(ser.at[k]);
-      cell[k] = j;
+      cell[k] = getOr(ids, ser.at[k] * nc + cat.at[k], () => (cg.push(ser.at[k]), cc.push(cat.at[k]) - 1));
     }
     buckets(cell, cc.length).forEach((pos, j) => cellsOf(ser.names[cg[j]]).set(cat.names[cc[j]], reduce(pos)));
   }
@@ -334,7 +334,7 @@ export function pivot(frame: Frame, x: Key, y: string | MeasureFn, group?: Key, 
 }
 
 /** Keys sorted in place: dates oldest first, a field with a sort-by column in its order, else the data's order. */
-const ordered = (keys: string[], dates?: boolean, cmp?: Order) => (dates ? keys.sort() : cmp ? keys.sort(cmp) : keys);
+export const ordered = (keys: string[], dates?: boolean, cmp?: Order) => (dates ? keys.sort() : cmp ? keys.sort(cmp) : keys);
 
 /**
  * The categories to draw, in order: dates oldest first, then `sort`; `topN` keeps the n largest (in that
@@ -368,7 +368,7 @@ function topN(entries: [string, number][], n: number): [string, number][] {
 /** True once a chart has every field it needs: nothing is guessed from the data. */
 export function chartReady(el: ChartElement): boolean {
   const m = el.mapping || {};
-  const kind = chartKind(el.chartType);
+  const kind = el.chartType;
   return kind === 'gauge' ? !!m.y : kind === 'sankey' ? !!(m.x && m.y && m.group) : kind === 'combo' ? !!(m.x && (m.y || m.line)) : !!(m.x && m.y);
 }
 
@@ -430,21 +430,26 @@ export function valueOf(ctx: ChartContext, ref: string, method: AggregationMetho
 /** A pivot's values compared with another's (b's period keys already moved onto a's): b, a − b or the % change. */
 const against = (a: number, b?: number, show?: Compare['show']) => comparison(a, b, show)?.d ?? NaN;
 
-const STAT_NAMES = { average: 'Average', median: 'Median', min: 'Minimum', max: 'Maximum' };
-/** A statistic of a series' values (a reference line's), or null when it has none. */
-function statOf(data: number[], stat: keyof typeof STAT_NAMES): number | null {
-  const v = data.filter(Number.isFinite).sort((a, b) => a - b);
-  if (!v.length) return null;
-  return stat === 'min' ? v[0] : stat === 'max' ? v[v.length - 1] : stat === 'median' ? (v[(v.length - 1) >> 1] + v[v.length >> 1]) / 2 : v.reduce((a, b) => a + b, 0) / v.length;
-}
-
 /** A chart format with display units for its axis and labels (shares and percents keep theirs). */
 const inUnits = (f: ChartFormat, units?: string) => (units && units !== 'auto' && f !== 'share' && f !== 'percent' ? (`${f ?? 'number'}|${units}` as ChartFormat) : f);
 
-/** Values added up along the axis, in its order. */
-const run = (data: number[], s?: ShowAs) => {
+/** True for a value shown along an axis (added up, year to date, averaged over the last points). */
+export const along = (s?: ShowAs) => !!s && s !== 'percent-of-total';
+/** How each "show as" along an axis reads in a value's name. */
+const ALONG_NAMES: Partial<Record<ShowAs, string>> = { 'running-total': ', running total', ytd: ', year to date', 'moving-average': ', 3-period average' };
+
+/**
+ * Values along an axis, in its order, as `s` shows them: added up; added up within each year (`keys`: the axis's date
+ * keys, "2025-03", "2025-Q1"; a new year starts again); or each the average of its last three points.
+ */
+export const run = (data: number[], s?: ShowAs, keys?: string[]) => {
   let t = 0;
-  return s === 'running-total' ? data.map(v => (t += v)) : data;
+  const year = (i: number) => keys?.[i]?.slice(0, 4);
+  return s === 'running-total' || s === 'ytd'
+    ? data.map((v, i) => (s === 'ytd' && i && year(i) !== year(i - 1) ? (t = v) : (t += v)))
+    : s === 'moving-average'
+      ? data.map((_, i) => ((w) => w.reduce((a, b) => a + b, 0) / w.length)(data.slice(Math.max(0, i - 2), i + 1)))
+      : data;
 };
 
 /** The data-i of the drawn piece under the pointer (a slice, curve, node, band), or −1. */
@@ -452,7 +457,7 @@ const pieceOf = (target: Element, selector: string) => Number(target.closest(sel
 
 /** Column, bar, line, area and combo charts. */
 function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec | null {
-  const kind = chartKind(el.chartType);
+  const kind = el.chartType;
   const { x, y, group, line } = el.mapping || {};
   const opt = el.options || {};
   const ys = el.summary || {};
@@ -498,11 +503,11 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
   const series = (bars ? groupsOf(bars.groups, ctx.groupDate, group && !groupPart ? ctx.order?.(group) : undefined) : []).map(([name, m]) => ({
     name: group ? datePartLabel(name, groupPart) : valueName,
     key: name,
-    data: run(cats.map(c => m.get(c) ?? 0), ys.showAs),
+    data: run(cats.map(c => m.get(c) ?? 0), ys.showAs, cats),
     line: kind === 'line' || kind === 'area',
     area: kind === 'area'
   }));
-  if (lineData) series.push({ name: lv!.label, data: run(cats.map(c => lineData.totals.get(c) ?? 0), ls.showAs), line: true, area: false, f: lineFmt } as any);
+  if (lineData) series.push({ name: lv!.label, data: run(cats.map(c => lineData.totals.get(c) ?? 0), ls.showAs, cats), line: true, area: false, f: lineFmt } as any);
   const shares = percent
     ? series.map(s => s.data.map((v, i) => {
         const total = series.reduce((a, t) => a + Math.abs(t.data[i]), 0);
@@ -533,8 +538,9 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
     lineWidth: opt.lineWidth,
     markers: opt.markers,
     refs: (opt.refLines ?? []).flatMap(r => {
-      const v = r.stat ? statOf(drawn[0]?.data ?? [], r.stat) : r.value;
-      return v == null || !Number.isFinite(v) ? [] : [{ value: v, label: `${r.label ?? (r.stat ? STAT_NAMES[r.stat] : '')} ${format(v)}`.trim(), color: r.color }];
+      const d = drawn[0]?.data ?? [], m = r.stat === 'average' ? 'avg' : r.stat;
+      const v = m ? summarizeRead(d.length, (k) => d[k], m) : r.value;
+      return v == null || !Number.isFinite(v) ? [] : [{ value: v, label: `${r.label ?? (m ? SUMMARY_NAMES[m] : '')} ${format(v)}`.trim(), color: r.color }];
     })
   });
 
@@ -564,14 +570,45 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
 /** Legend entries for names drawn in series colors, in order (none when the legend is switched off). */
 export const legendOf = (opt: ChartOptions, names: string[]) => (opt.showLegend === false ? [] : names.map((name, index) => ({ name, index })));
 
+/** A round number at or past `v`, away from zero: 1.2K → 2K, −34 → −40. */
+const nice = (v: number) => {
+  const mag = 10 ** Math.floor(Math.log10(Math.abs(v) || 1));
+  return Math.sign(v) * Math.ceil(Math.abs(v) / mag) * mag;
+};
+
+/** Half-ring gauge: mapping.y between options.min and options.max (round numbers past the value when unset). */
+function gaugeChart(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec {
+  const o = el.options || {}, y = el.mapping.y!, m = ctx.measure?.(y);
+  const v = (m ? m.fn(frame) : aggregate(frame, el.summary?.aggregate || 'sum', y)) ?? 0;
+  const fmt = (o.format ?? m?.format) as ChartFormat;
+  // the ends left free: 0, and a round number past the value (below it when it's negative) or past the other end
+  const min = o.min ?? Math.min(0, nice(Math.min(v, o.max ?? 0) * 1.2));
+  const top = Math.max(v, min, 0);
+  const max = o.max ?? (top ? nice(top * 1.2) : min < 0 ? 0 : 1);
+  const point = (t: number) => {
+    const a = Math.PI * (1 - Math.max(0, Math.min(1, t)));
+    return `${50 + 40 * Math.cos(a)} ${55 - 40 * Math.sin(a)}`;
+  };
+  const arc = (t: number, color: string) => `<path d="M${point(0)}A40 40 0 0 1 ${point(t)}" stroke="${color}" stroke-width="10" fill="none"/>`;
+  const text = (x: number, y: number, size: number, color: string, s: string) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="${size}" fill="var(--${color})">${esc(s)}</text>`;
+  return {
+    legend: [],
+    names: [m?.name ?? y],
+    draw: (a) =>
+      `<svg class="d-gauge" width="${a.w}" height="${a.h}" viewBox="0 0 100 64">${arc(1, 'var(--chrome-2)')}${arc((v - min) / (max - min || 1), 'var(--gauge-color, var(--accent))')}` +
+      `${text(50, 52, 13, 'ink" font-weight="700', formatValue(v, fmt))}${text(10, 63, 5, 'muted', formatCompact(min, fmt))}${text(90, 63, 5, 'muted', formatCompact(max, fmt))}</svg>`
+  };
+}
+
 export function buildChart(el: ChartElement, frame: Frame, ctx: ChartContext = {}): ChartSpec {
-  const kind = chartKind(el.chartType);
+  const kind = el.chartType;
   const { x, y, group } = el.mapping || {};
   const opt = el.options || {};
   const method = el.summary?.aggregate || 'sum';
   const showAs = el.summary?.showAs;
   const none: ChartSpec = { legend: [] };
-  if (!frame.length || kind === 'gauge' || !chartReady(el)) return none;
+  if (!frame.length || !chartReady(el)) return none;
+  if (kind === 'gauge') return gaugeChart(el, frame, ctx);
   if (['bar', 'hbar', 'line', 'area', 'combo'].includes(kind)) return buildXY(el, frame, ctx) ?? none;
   if (kind === 'scatter') return buildScatter(el, frame, ctx) ?? none;
   const xKey = keyOf(x!, el.dateParts?.x);
@@ -663,7 +700,7 @@ export function buildChart(el: ChartElement, frame: Frame, ctx: ChartContext = {
   // nodes in order of first appearance, each flow's source before its target
   const names: string[] = [];
   const index = new Map<string, number>();
-  const node = (name: string) => index.get(name) ?? (index.set(name, names.length), names.push(name) - 1);
+  const node = (name: string) => getOr(index, name, () => names.push(name) - 1);
   const links = flows.map(([src, dst, v]) => ({ source: node(xLabel(src)), target: node(gLabel(dst)), value: v }));
   const chart = sankeyChart(names, links, short);
   return {

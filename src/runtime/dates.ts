@@ -43,6 +43,9 @@ export const dayFirst = (values: Iterable<unknown>) => {
   return false;
 };
 
+/** A value's key: its date's bucket for `part`, else its text. */
+export const partKey = (part?: DatePart) => (part ? (v: unknown) => datePartKey(String(v), part) : String);
+
 /** The bucket a date falls in; keys sort chronologically as strings. */
 export function datePartKey(isoDate: string, part: DatePart): string {
   if (!isoDate) return '';
