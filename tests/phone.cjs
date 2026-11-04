@@ -78,7 +78,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForSelector('.d-drawer .d-card-head');
     const drawerBox = await page.$eval('.d-drawer', (d) => { const r = d.getBoundingClientRect(); return r.top <= 0 && r.left <= 0 && r.width >= innerWidth && r.height >= innerHeight; });
     check(`${at}: the drawer fills the screen`, drawerBox);
-    check(`${at}: the drawer's slicers are cards, closed by the Filters button (no Done)`, !!(await page.$('.d-drawer .d-filter-card')) && !(await page.$('.d-drawer .btn-primary')));
+    check(`${at}: the drawer's slicers are cards, and the Filters button reads Done while it's open`, !!(await page.$('.d-drawer .d-filter-card')) && (await button.evaluate((b) => b.textContent.trim())) === 'Done');
     check(`${at}: a drawer card starts closed`, !(await page.$('.d-drawer .d-slicer')));
     await (await page.$('.d-drawer .d-card-head')).tap();
     await page.waitForSelector('.d-drawer .d-slicer');
@@ -151,6 +151,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await page.goto(pathToFileURL(FILE).href);
       await page.waitForSelector('.d-visual-container[data-type="chart"]');
       await sleep(500);
+      // at 100%: a page that fits the window stays centered as it zooms, so the point between the fingers holds once
+      // the page is wider than the window
+      await page.click('.d-zoom-pct');
+      await page.$$eval('.d-context-menu button', (bs) => bs.find((b) => b.textContent.startsWith('100%')).click());
+      await page.$eval('.d-canvas-scroll-container', (s) => s.scrollTo(0, 0));
+      await sleep(100);
       // both fingers on the first card: at this width the panes cover the ones beside it
       const box = await (await page.$('.d-visual-container[data-type="card"]')).boundingBox();
       const at = (f) => ({ x: box.x + box.width * f, y: box.y + box.height / 2 });

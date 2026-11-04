@@ -67,9 +67,9 @@ const RelCard: Component<{
  * Edit Data: rename the table and its columns, change column types, edit the connections between this
  * table's fields and other tables' fields, and see which visuals use it.
  */
-export const EditDataDialog: Component<{ id: string; onClose: () => void; onReplace: () => void }> = (props) => {
+export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => void; onReplace: () => void }> = (props) => {
   const [id, setId] = createSignal(props.id); // follows renames
-  const [tab, setTab] = createSignal<Tab>('data');
+  const [tab, setTab] = createSignal<Tab>(props.tab ?? 'data');
   const [error, setError] = createSignal('');
   const src = () => store.doc.sources[id()];
   const frame = () => store.tableFrame(id());

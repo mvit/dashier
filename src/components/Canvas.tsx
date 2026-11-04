@@ -11,6 +11,7 @@ import { pinching } from '../runtime/tooltip';
 import { pickSummary, flipped } from '../runtime/data';
 import { datePartLabel } from '../runtime/dates';
 import { DataTableDialog, tabular } from './DataTableDialog';
+import { PickChip } from './TopBar';
 
 // Must match .d-visuals-grid in theme.css
 const ROW_H = 85;
@@ -80,7 +81,7 @@ export const Canvas: Component = () => {
     if (!mode || !w || dragging()) return;
     const zw = (w - 2 * VIEW_PAD) / size().width;
     const zh = (h - 2 * VIEW_PAD) / sheetH();
-    applyZoom(mode === 'width' ? zw : Math.min(zw, zh));
+    applyZoom(mode === 'width' ? zw : mode === 'auto' ? Math.min(zw, 1) : Math.min(zw, zh));
   });
 
   // A press on a scrollbar stays the browser's: a classic one is past the client area, an overlay one over its edge
@@ -314,8 +315,8 @@ export const Canvas: Component = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         if ((e.target as HTMLElement).closest('button,input,select,textarea,a,label')) return;
-                        // a chart's own clicks pick or let go (ChartHost); a click on anything else lets go
-                        if (!(e.target as HTMLElement).closest('.d-chart-plot')) store.clearPick();
+                        // a chart's and a table's own clicks pick or let go; a click on anything else lets go
+                        if (!(e.target as HTMLElement).closest('.d-chart-plot, .d-table tbody')) store.clearPick();
                         if (store.editing()) store.setSelectedElementId(elem.id);
                       }}
                       // a visual is a stop for the keyboard: Enter shows its numbers as a table, or selects it in the editor
@@ -371,9 +372,10 @@ export const Canvas: Component = () => {
       </div>
 
       {/* always there on a phone; with no slicers on the page, there's nothing to open */}
-      <button class={`btn-secondary d-drawer-btn ${drawer() ? 'active' : ''}`} disabled={!slicers().length} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
-        Filters
+      <button class={`${drawer() ? 'btn-primary' : 'btn-secondary'} d-drawer-btn`} disabled={!slicers().length} onClick={(e) => (e.stopPropagation(), setDrawer(!drawer()))}>
+        {drawer() ? 'Done' : 'Filters'}
       </button>
+      <PickChip class="d-pick-float" />
       <Show when={slicers().length}>
         <Show when={drawer()}>
           <div class="d-drawer" style={reportStyle(store.reportTheme())} onClick={(e) => e.stopPropagation()}>

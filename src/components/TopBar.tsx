@@ -5,6 +5,19 @@ import { Logo, RedoIcon, UndoIcon } from './icons';
 import { PasswordDialog } from './PasswordDialog';
 import { blurOnEnter } from './ui';
 import { parseDoc } from '../runtime/save';
+import { datePartLabel } from '../runtime/dates';
+
+/** What a clicked mark filters the page by, and the way to let go of it (Esc and a click elsewhere do too). */
+export const PickChip = (props: { class?: string }) => (
+  <Show when={store.picked()}>
+    {(p) => (
+      <button class={`d-pick-chip ${props.class ?? ''}`} title="Show everything again (Esc)" onClick={(e) => (e.stopPropagation(), store.clearPick())}>
+        Filtered by {p().filters.map((f) => datePartLabel(f.values![0], f.datePart)).join(', ')}
+        <span aria-hidden="true">×</span>
+      </button>
+    )}
+  </Show>
+);
 
 export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }> = (props) => {
   const [notification, setNotification] = createSignal('');
@@ -76,8 +89,8 @@ export const TopBar: Component<{ onAbout: () => void; onExportJSON: () => void }
           onKeyDown={blurOnEnter}
           title={store.preview() ? 'Dashboard title' : 'Rename dashboard'}
         />
+        <PickChip />
       </div>
-
       <div class="ed-group ed-group-right">
         <Show when={!store.preview()} fallback={
           <button class="btn-primary" title="Edit this report (Esc)" onClick={() => store.setPreview(false)}>Edit</button>

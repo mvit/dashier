@@ -4,7 +4,7 @@ import { hideTip, pinching, showTip } from '../../runtime/tooltip';
 import { observeSize } from '../../runtime/view';
 
 /** Draws a chart's SVG at exactly the space the parent gives it, in the report's font, with its tooltips. */
-export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['tip']; minWidth?: number; picked?: string; onPick?: (target: Element) => void }> = (props) => {
+export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['tip']; minWidth?: number; picked?: string; onPick?: (target: Element, pt: { x: number; y: number }) => void }> = (props) => {
   let host!: HTMLDivElement;
   const [area, setArea] = createSignal({ w: 0, h: 0, font: '' });
 
@@ -43,7 +43,10 @@ export const ChartHost: Component<{ draw?: ChartSpec['draw']; tip?: ChartSpec['t
   // a press that moved was a drag (the visual, in the editor), not a click on a mark
   let down = { x: 0, y: 0 };
   const onPress = (e: PointerEvent) => ((down = { x: e.clientX, y: e.clientY }), onMove(e));
-  const onClick = (e: MouseEvent) => Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && props.onPick?.(e.target as Element);
+  const onClick = (e: MouseEvent) => {
+    const m = host.querySelector('svg')?.getScreenCTM();
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && m) props.onPick?.(e.target as Element, new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()));
+  };
 
   // Tooltips: the spec maps the pointer (in the SVG's own coordinates, whatever the zoom) to values.
   // A mouse or pen hovers; a finger taps (a drag pans the page, two fingers pinch: no tooltip then).

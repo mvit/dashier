@@ -56,7 +56,7 @@ export const ChartWidget: Component<{ element: ChartElement }> = (props) => {
                 tip={spec().tip}
                 minWidth={store.phone() && !store.printing() ? spec().minWidth : 0}
                 picked={store.picked()?.from === el().id ? store.picked()!.mark : undefined}
-                onPick={spec().pick && !store.printing() ? (t) => store.pickMark(el(), spec().pick!(t)) : undefined}
+                onPick={spec().pick && !store.printing() ? (t, pt) => store.pickMark(el(), spec().pick!(t, pt)) : undefined}
               />
               <Show when={spec().legend.length}>
                 <div class="d-legend">

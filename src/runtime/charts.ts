@@ -400,8 +400,8 @@ export interface ChartSpec {
   legend: { name: string; index: number; line?: boolean }[];
   /** The tooltip for the pointer at `pt` (SVG coordinates) over `target`. */
   tip?: (target: Element, svg: SVGSVGElement, pt: { x: number; y: number }) => Tip | null;
-  /** The value a click on `target` picks: only a bar, a slice or a treemap block has one. */
-  pick?: (target: Element) => ChartPick | null;
+  /** The value a click on `target` (at `pt`, in SVG coordinates) picks: a bar, a line's point, a slice or a block. */
+  pick?: (target: Element, pt: { x: number; y: number }) => ChartPick | null;
 }
 
 /** What the chart needs to know beyond its element: which fields are dates, and the measures it can use. */
@@ -560,9 +560,16 @@ function buildXY(el: ChartElement, frame: Frame, ctx: ChartContext): ChartSpec |
       const value = (k: number) => (shares ? `${formatFull(shares[k][i], 'share')} (${formatFull(series[k].data[i], valueFmt)})` : formatFull(series[k].data[i], (series[k] as any).f ?? fmt));
       return { title: shown[i], rows: series.map((s, k) => ({ label: s.name, value: value(k), color: seriesColor(k), active: k === active })) };
     },
-    pick: (target) => {
-      const k = target.closest('.c-bars')?.getAttribute('data-s'), i = target.getAttribute('data-i');
-      return k == null || i == null ? null : pickOf(`.c-bars[data-s="${k}"] rect[data-i="${i}"]`, cats[+i], group ? (series[+k] as any).key : undefined);
+    pick: along(ys.showAs) || along(ls.showAs) ? undefined : (target, pt) => {
+      const bars = target.closest('.c-bars'), line = target.closest('.c-line, .c-area');
+      const k = (bars ?? line)?.getAttribute('data-s');
+      if (bars) {
+        const i = target.getAttribute('data-i');
+        return k == null || i == null ? null : pickOf(`.c-bars[data-s="${k}"] rect[data-i="${i}"]`, cats[+i], group ? (series[+k] as any).key : undefined);
+      }
+      // a line or an area: the category under the pointer, of the series clicked (anywhere on a line chart: all of them)
+      const i = line || kind === 'line' || kind === 'area' ? chart.hit(pt.x, pt.y) : -1;
+      return i < 0 ? null : pickOf(`.c-line${k == null ? '' : `[data-s="${k}"]`} circle[data-i="${i}"]`, cats[i], group && k != null ? (series[+k] as any).key : undefined);
     }
   };
 }

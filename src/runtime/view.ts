@@ -12,8 +12,9 @@ type Anchor = { x: number; y: number };
  */
 export const view = createRoot(() => {
   const [zoom, setZoom] = createSignal(1);
-  // "#fit" in the URL opens the page fitted to the window: a report embedded in a smaller frame, say
-  const [fit, setFit] = createSignal<'page' | 'width' | null>(location.hash.slice(1).split(',').includes('fit') ? 'page' : null);
+  // the page opens as wide as the window allows, up to its own size ('auto'), centered; "#fit" in the URL fits the
+  // whole page instead (a report embedded in a smaller frame, say). Any zoom picked by hand leaves either.
+  const [fit, setFit] = createSignal<'page' | 'width' | 'auto' | null>(location.hash.slice(1).split(',').includes('fit') ? 'page' : 'auto');
   let apply: (z: number, at?: Anchor) => void = (z) => setZoom(clampZoom(z));
 
   /** Zooms to `z` (leaving any fit mode), around `at` in client coordinates or the view's center. */

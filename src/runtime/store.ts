@@ -324,13 +324,17 @@ function createDashboardStore() {
   // or anywhere else, Esc, another page or any edit (the mark may be gone) lets it go.
   const [picked, setPicked] = createSignal<{ from: string; mark: string; filters: DashFilter[] } | null>(null);
   createEffect(() => (activePageId(), setPicked(null)));
-  function pickMark(el: ChartElement, pick?: ChartPick | null) {
-    const on = (ref: string, value: string, datePart?: DatePart): DashFilter => {
-      return { ...describeRef(el.sourceId, ref), datePart, values: [value] };
-    };
-    const same = picked()?.from === el.id && picked()?.mark === pick?.mark;
-    setPicked(!pick || same ? null : { from: el.id, mark: pick.mark, filters: [on(el.mapping.x!, pick.x, el.dateParts?.x), ...(pick.group == null ? [] : [on(el.mapping.group!, pick.group, el.dateParts?.group)])] });
+  /** Filters the page by the values a clicked mark or cell stands for (`mark` finds it again); a second click lets go. */
+  function pickFields(el: DashElement, mark: string, picks: { ref: string; value: unknown; datePart?: DatePart }[]) {
+    const same = picked()?.from === el.id && picked()?.mark === mark;
+    // a blank isn't one value to filter by
+    const ok = picks.every(p => p.value != null && p.value !== '' && p.value !== '(Blank)');
+    setPicked(same || !ok ? null : { from: el.id, mark, filters: picks.map(p => ({ ...describeRef(el.sourceId, p.ref), datePart: p.datePart, values: [String(p.value)] })) });
   }
+  const pickMark = (el: ChartElement, pick?: ChartPick | null) =>
+    pick
+      ? pickFields(el, pick.mark, [{ ref: el.mapping.x!, value: pick.x, datePart: el.dateParts?.x }, ...(pick.group == null ? [] : [{ ref: el.mapping.group!, value: pick.group, datePart: el.dateParts?.group }])])
+      : setPicked(null);
 
   /** Filtered whole tables, shared by visuals that see the same filters; a new map when the data or those filters change. */
   const frameCache = createMemo(() => (dataStore(), doc.filters, doc.relationships, doc.pages.forEach(p => (p.filters, p.elements.forEach(e => (e.filters, (e as SlicerElement).selection)))), new Map<string, Frame>()));
@@ -364,7 +368,7 @@ function createDashboardStore() {
    */
   function filtersOf(elem: DashElement, skip?: string): DashFilter[] {
     const page = pageFor(elem), pick = picked();
-    const clicked = pick && pick.from !== elem.id && page?.elements.some(e => e.id === pick.from) ? pick.filters : [];
+    const clicked = !skip && pick && pick.from !== elem.id && page?.elements.some(e => e.id === pick.from) ? pick.filters : [];
     return (elem as any).whole ? elem.filters || [] : [...(doc.filters || []), ...(page?.filters || []), ...slicerFilters(page, skip), ...(elem.filters || []), ...clicked];
   }
 
@@ -474,15 +478,17 @@ function createDashboardStore() {
     return vars;
   }
 
-  /**
-   * How a visual on `sourceId` refers to a field of `table`: the plain name for its own table,
-   * "table.field" for a connected table, or null when the tables aren't connected.
-   */
-  function fieldRef(sourceId: string | undefined, f: { table: string; field: string }): string | null {
-    if (!sourceId || f.table === sourceId) return f.field;
-    return joinPath(sourceId, f.table) ? `${f.table}.${f.field}` : null;
-  }
+  /** How a visual on `sourceId` refers to a field of `table`: the plain name for its own table, else "table.field". */
+  const fieldRef = (sourceId: string | undefined, f: { table: string; field: string }) => (!sourceId || f.table === sourceId ? f.field : `${f.table}.${f.field}`);
 
+  /**
+   * The tables whose fields a visual groups by that no relationship connects to its own: it can't be worked out
+   * (Power BI's "can't determine relationships"). A measure of such a table is fine: it shows its total.
+   */
+  const unconnected = (e: DashElement) =>
+    e.sourceId ? [...new Set(fieldRefs(e).flatMap(f => (isMeasureRef(f) ? [] : [refTableOf(e.sourceId, f)])).filter((t): t is string => !!t && !joinPath(e.sourceId!, t)))] : [];
+  /** A table whose connections the user asked to edit (from a visual that needs one): the app opens them. */
+  const [connecting, setConnecting] = createSignal<string | null>(null);
   /** True for a table's name (and never for a name every object has, like "constructor"). */
   const isTable = (name: string) => Object.hasOwn(doc.sources, name);
   /** The tables' names, in order. */
@@ -730,8 +736,8 @@ function createDashboardStore() {
 
   /**
    * Puts a dragged field into one of a visual's slots. The first field decides which table the visual reads
-   * from; later fields must come from that table or one connected to it (they arrive as "table.field").
-   * A refused field leaves a note and changes nothing.
+   * from; later ones arrive as "table.field" (a visual whose tables aren't connected says so). A field that
+   * can't go in the slot leaves a note and changes nothing.
    */
   function assignField(elem: DashElement, slot: Slot, f: { table: string; field: string; aggregate?: AggregationMethod; showAs?: ShowAs }): boolean {
     const e = elem as any;
@@ -740,10 +746,6 @@ function createDashboardStore() {
       // a measure is a number of its own table: it goes in value wells only (both of a scatter's axes are values)
       if (e.type === 'slicer' || !['y', 'line', 'field', 'column', 'value', ...(scatter ? ['x'] : [])].includes(slot)) {
         setDropNote('A measure is a number: drop it on values, columns or a card.');
-        return false;
-      }
-      if (e.sourceId && fieldRefs(e).length && f.table !== e.sourceId && !joinPath(e.sourceId, f.table)) {
-        setDropNote(`"${f.table}" isn't connected to "${e.sourceId}", so its measures can't be worked out here. Connect them under Edit Data… → Connections.`);
         return false;
       }
     }
@@ -760,10 +762,6 @@ function createDashboardStore() {
     const empty = fieldRefs(e).length === 0; // nothing placed yet: any table may start the visual
     // a measure is "[name]" wherever it's used
     const ref = empty || !e.sourceId || isMeasureRef(f.field) ? f.field : fieldRef(e.sourceId, f);
-    if (ref === null) {
-      setDropNote(`"${f.table}" isn't connected to "${e.sourceId}". Connect them under Edit Data… → Connections, or clear this visual's fields to start from "${f.table}".`);
-      return false;
-    }
     setDropNote('');
     const updates: any = { sourceId: empty || !e.sourceId ? f.table : e.sourceId };
     if (e.type === 'matrix') {
@@ -1410,6 +1408,10 @@ function createDashboardStore() {
     phone: isPhone,
     picked,
     pickMark,
+    pickFields,
+    unconnected,
+    connecting,
+    setConnecting,
     clearPick: () => setPicked(null),
     preview,
     setPreview,

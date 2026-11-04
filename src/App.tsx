@@ -1,4 +1,4 @@
-import { Component, createSignal, onCleanup, Show, JSX } from 'solid-js';
+import { Component, createSignal, onCleanup, Show, JSX, createEffect } from 'solid-js';
 import { store } from './runtime/store';
 import { TopBar } from './components/TopBar';
 import { Canvas } from './components/Canvas';
@@ -12,6 +12,7 @@ import { ContextMenuHost } from './components/ContextMenu';
 import { AddDataDialog } from './components/AddDataDialog';
 import { EditDataDialog } from './components/EditDataDialog';
 import { Modal } from './components/Modal';
+import { reportStyle } from './runtime/theme';
 
 /** The project's home, shown in About. */
 const GITHUB = 'https://github.com/mvit/dashier';
@@ -39,7 +40,9 @@ const Pane: Component<{ open: boolean; label: string; class: string; setOpen: (o
 
 export const App: Component = () => {
   // At most one dialog at a time: adding a table, editing the named one, replacing its data, a measure, or About.
-  const [dialog, setDialog] = createSignal<{ add?: true; edit?: string; replace?: string; measure?: { table: string; name?: string; field?: string }; about?: true; exportJSON?: true } | null>(null);
+  const [dialog, setDialog] = createSignal<{ add?: true; edit?: string; replace?: string; measure?: { table: string; name?: string; field?: string }; about?: true; exportJSON?: true; tab?: 'relationships' } | null>(null);
+  // a visual asking for its tables to be connected opens its table's connections
+  createEffect(() => { const t = store.connecting(); if (t) (setDialog({ edit: t, tab: 'relationships' }), store.setConnecting(null)); });
   const close = () => setDialog(null);
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,10 +94,18 @@ export const App: Component = () => {
     window.removeEventListener('beforeunload', handleBeforeUnload);
   });
 
+  // a reader (preview, a phone) sees the report only: everything around it takes its theme, its accent the selection
+  const reader = () => store.preview() || store.phone();
+  const dark = () => (reader() ? store.reportTheme().dark : store.isDark());
+  const readerStyle = () => {
+    const t = store.reportTheme();
+    return { ...reportStyle(t), '--chrome': t.background, '--selection': t.accent };
+  };
   return (
     <div
-      class={`ed-root ${store.isDark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() && !store.printing() ? 'mode-phone mode-sheet' : ''}`}
-      data-theme={store.isDark() ? 'dark' : 'light'}
+      class={`ed-root ${dark() ? 'theme-dark' : 'theme-light'} ${store.preview() ? 'mode-preview' : 'mode-edit'} ${store.printing() ? 'mode-printing' : ''} ${store.phone() && !store.printing() ? 'mode-phone mode-sheet' : ''}`}
+      data-theme={dark() ? 'dark' : 'light'}
+      style={reader() ? readerStyle() : undefined}
     >
       <TopBar onAbout={() => setDialog({ about: true })} onExportJSON={() => setDialog({ exportJSON: true })} />
 
@@ -130,7 +141,7 @@ export const App: Component = () => {
         <AddDataDialog onClose={close} />
       </Show>
       <Show when={dialog()?.edit}>
-        {(id) => <EditDataDialog id={id()} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
+        {(id) => <EditDataDialog id={id()} tab={dialog()?.tab} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
       </Show>
       <Show when={dialog()?.about}>
         <Modal class="d-small d-about" title="Dashier" subtitle="Your report and data in one editable HTML file." onClose={close} ok="Done" onOk={close}>

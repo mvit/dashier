@@ -541,7 +541,7 @@ test('stacked bars stand on each other; 100% stacked fill each category', () => 
 test('area charts fill under the line; donuts have a hole', () => {
   const area = drawn(buildChart(chart({ chartType: 'area', mapping: { x: 'region', y: 'v', group: 'q' }, options: { stack: 'stacked' } }), rowsFrame(sales)));
   assert.equal((area.match(/class="c-area"/g) || []).length, 2);
-  assert.doesNotMatch(area, /<circle/);
+  assert.doesNotMatch(area, /<circle[^>]* r="[1-9]/, 'an area\'s points are there to click, not drawn');
   const donut = drawn(buildChart(chart({ chartType: 'donut' }), rowsFrame(sales)));
   // a ring slice: out along the rim, in, then back along the inner rim
   assert.match(donut, /class="c-slice" data-i="0" d="M[^"]*A[^"]*L[^"]*A[^"]*Z"/);
@@ -1159,20 +1159,24 @@ test('mobile column charts retain all marks at readable widths', () => {
   assert.equal(buildChart({ ...el, chartType: 'line' }, rowsFrame(rows)).minWidth, undefined);
 });
 
-test('click to filter: bars, slices and blocks pick their value; blanks, "Other" and lines pick nothing', () => {
+test('click to filter: bars, line points, slices and blocks pick their value; blanks and "Other" pick nothing', () => {
   const rows = [{ c: 'a', g: 'x', v: 1 }, { c: 'b', g: 'y', v: 2 }, { c: '', g: 'y', v: 3 }];
   const el = (s: string, i: string) => ({ getAttribute: (a: string) => (a === 'data-i' ? i : null), closest: (q: string) => (q === '.c-bars' ? { getAttribute: () => s } : null) }) as unknown as Element;
   const bars = buildChart(chart({ mapping: { x: 'c', y: 'v', group: 'g' } }), rowsFrame(rows));
-  assert.deepEqual(bars.pick!(el('0', '0')), { mark: '.c-bars[data-s="0"] rect[data-i="0"]', x: 'a', group: 'x' });
-  assert.equal(bars.pick!(el('1', '2')), null, 'a blank is no value');
-  assert.equal(buildChart(chart({ chartType: 'line', mapping: { x: 'c', y: 'v' } }), rowsFrame(rows)).pick!({ getAttribute: () => null, closest: () => null } as unknown as Element), null, 'a line is no bar');
+  const at = { x: 0, y: 0 };
+  assert.deepEqual(bars.pick!(el('0', '0'), at), { mark: '.c-bars[data-s="0"] rect[data-i="0"]', x: 'a', group: 'x' });
+  assert.equal(bars.pick!(el('1', '2'), at), null, 'a blank is no value');
+  // a line picks the category under the pointer, wherever on the plot
+  const line = buildChart(chart({ chartType: 'line', mapping: { x: 'c', y: 'v' } }), rowsFrame(rows));
+  const svg = line.draw!({ w: 600, h: 300 }), cx = Number(svg.match(/<circle cx="([\d.]+)"[^>]*data-i="1"/)![1]);
+  assert.deepEqual(line.pick!({ getAttribute: () => null, closest: () => null } as unknown as Element, { x: cx + 3, y: 40 }), { mark: '.c-line circle[data-i="1"]', x: 'b', group: undefined });
   const piece = (i: number) => ({ closest: () => ({ getAttribute: () => String(i) }) }) as unknown as Element;
   const many = Array.from({ length: 4 }, (_, i) => ({ c: `k${i}`, v: 10 - i }));
   const pie = buildChart(chart({ chartType: 'pie', mapping: { x: 'c', y: 'v' }, options: { topN: 2 } }), rowsFrame(many));
-  assert.equal(pie.pick!(piece(0))!.x, 'k0');
-  assert.equal(pie.pick!(piece(2)), null, 'the rest, as "Other", is no value');
+  assert.equal(pie.pick!(piece(0), at)!.x, 'k0');
+  assert.equal(pie.pick!(piece(2), at), null, 'the rest, as "Other", is no value');
   const tree = buildChart(chart({ chartType: 'treemap', mapping: { x: 'c', y: 'v', group: 'g' } }), rowsFrame(rows.slice(0, 2)));
-  const leaf = [0, 1, 2, 3].map(i => tree.pick!(piece(i))).find(p => p?.x === 'a');
+  const leaf = [0, 1, 2, 3].map(i => tree.pick!(piece(i), at)).find(p => p?.x === 'a');
   assert.deepEqual([leaf?.x, leaf?.group], ['a', 'x']);
 });
 
@@ -1300,4 +1304,11 @@ test('scatter: the legend in its field’s order, the x axis titled by xAxisLabe
   assert.deepEqual([...pts.series.slice(0, pts.n)], [2, 1, 0], 'each point keeps its own series');
   assert.deepEqual(scatterPoints(el, f, { groupDate: false })!.seriesNames, ['b', 'a', 'c'], 'no order: as first seen');
   assert.ok(buildChart(el, f).draw!({ w: 600, h: 400 }).includes('Size (m²)'));
+});
+
+test('click to filter: a running total, year to date or moving average can\'t filter the page', () => {
+  const f = rowsFrame([{ m: 'Jan', v: 1 }, { m: 'Feb', v: 2 }]);
+  const el = (showAs?: string) => ({ id: 'c', type: 'chart', chartType: 'bar', mapping: { x: 'm', y: 'v' }, summary: showAs ? { showAs } : undefined }) as any;
+  assert.ok(buildChart(el(), f).pick, 'a plain bar picks its category');
+  for (const s of ['running-total', 'ytd', 'moving-average']) assert.equal(buildChart(el(s), f).pick, undefined, s);
 });

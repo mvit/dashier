@@ -167,6 +167,8 @@ const openFile = async (p, file) => {
   await page.click('.c-bars rect');
   await sleep(200);
   check('clicking a bar filters the rest of the page and dims the other bars', (await kpis()) !== whole && (await dimmed()) === 1 && (await page.$$('.c-bars rect.c-on')).length === 1, await kpis());
+  const chip = await page.$eval('.ed-topbar .d-pick-chip', (c) => c.textContent).catch(() => '');
+  check('…and the top bar says what the page is filtered by', chip.startsWith('Filtered by '), chip);
   await page.click('.c-bars rect.c-on');
   await sleep(200);
   check('clicking it again lets go', (await kpis()) === whole && (await dimmed()) === 0, await kpis());
@@ -175,7 +177,28 @@ const openFile = async (p, file) => {
   await page.keyboard.press('Escape');
   await sleep(200);
   check('Esc lets go of the pick first, and stays in preview', (await kpis()) === whole && !!(await page.$('.mode-preview')));
-
+  await page.click('.c-bars rect');
+  await sleep(200);
+  await page.click('.ed-topbar .d-pick-chip');
+  await sleep(200);
+  check('…and so does the chip\'s ×', (await kpis()) === whole && !(await page.$('.d-pick-chip')));
+  // a line chart picks the category under the pointer; a table cell, its value (a second click lets go)
+  const chipText = () => page.$eval('.ed-topbar .d-pick-chip', (c) => c.textContent).catch(() => '');
+  const plot = await (await page.$('.d-visual-container[data-id="elem_chart_trend"] .d-chart-plot')).boundingBox();
+  await page.mouse.click(plot.x + plot.width / 2, plot.y + plot.height / 2);
+  await sleep(200);
+  const lineChip = await chipText();
+  check('clicking a line chart filters the page by the category under the pointer, and marks its point', (await kpis()) !== whole && lineChip.startsWith('Filtered by Q') && !!(await page.$('svg.c-picked .c-line circle.c-on')), lineChip);
+  await page.keyboard.press('Escape');
+  await sleep(200);
+  const cell = '.d-visual-container[data-id="elem_table_raw"] tbody tr[data-p] td';
+  await page.click(cell);
+  await sleep(200);
+  const cellChip = await chipText();
+  check('clicking a table cell filters the page by its value, and the table dims the other rows', (await kpis()) !== whole && cellChip.startsWith('Filtered by ') && !!(await page.$('.d-table.d-has-pick tr.c-on')), cellChip);
+  await page.click('.d-visual-container[data-id="elem_table_raw"] tbody tr.c-on td');
+  await sleep(200);
+  check('…and clicking it again lets go', (await kpis()) === whole && !(await page.$('.d-has-pick')));
   // a chart's numbers as a table: from its menu, or Enter on it with the keyboard
   const barChart = await page.$('.d-visual-container[data-type="chart"]:has(.c-bars)');
   const bb = await barChart.boundingBox();
@@ -255,6 +278,11 @@ const openFile = async (p, file) => {
 
   // ── drag, resize, undo ──────────────────────────────────────────────────────
   await open();
+  // drags measured in screen pixels: at 100% (a page opens fitted to the window)
+  await page.click('.d-zoom-pct');
+  await page.$$eval('.d-context-menu button', (bs) => bs.find((b) => b.textContent.startsWith('100%')).click());
+  await page.$eval('.d-canvas-scroll-container', (s) => s.scrollTo(0, 0));
+  await sleep(100);
   const g0 = await css(0);
   const colW = (await page.$eval('.d-visuals-grid', (g) => g.getBoundingClientRect().width + 14)) / 12;
   const box = await (await page.$$(tiles))[0].boundingBox();
@@ -560,7 +588,14 @@ const openFile = async (p, file) => {
   await pickMenu('.d-wells-container .d-field-well:nth-child(2) .d-pill', 'Same period last year');
   check('…and compared with the same period last year', (await slotText(1)).includes(', % vs last year'), await slotText(1));
   await drag('scratch', 'a', 0);
-  check('a field of an unconnected table is refused with a hint', !!(await page.$('.d-drop-note')) && (await slotText(0)).includes('quarter'));
+  const unconnected = await page.$$eval(tiles, (ts) => ts.at(-1).textContent);
+  check("a field of an unconnected table is placed, and the visual says the tables aren't connected (as Power BI does)", !(await page.$('.d-drop-note')) && /regional_metrics and scratch aren.t connected/.test(unconnected), unconnected);
+  await page.$$eval(tiles, (ts) => ts.at(-1).querySelector('.d-unconnected button').click());
+  await page.waitForSelector('.d-editdata');
+  const relTab = await page.$eval('.d-editdata .d-dialog-seg button.on', (b) => b.textContent).catch(() => '');
+  check("…and its Connect button opens the table's relationships", relTab.startsWith('Relationships'), relTab);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.d-editdata', { hidden: true });
   for (let i = 0; i < 2; i++) await page.click('.d-wells-container .d-pill .d-pill-x');
   check('removing the fields empties the slots again', (await slotsEmpty()) === 3);
   await drag('scratch', 'a', 0);

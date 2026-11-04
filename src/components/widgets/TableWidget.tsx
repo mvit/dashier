@@ -264,6 +264,23 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
   // "Total" goes in the first column that has no total of its own
   const totalLabelAt = () => totals().findIndex(t => t == null);
 
+  // Click to filter: a cell of a plain column filters the page by its value; a summarized one, by its row's plain
+  // values. The picked row stays bright, the others dim (the mark is the columns and values, so it outlives a sort).
+  const picking = createMemo(() => {
+    const p = store.picked();
+    return p?.from === el().id ? (JSON.parse(p.mark) as { i: number[]; v: unknown[] }) : null;
+  });
+  const isPicked = (row: Row) => !!picking()?.i.every((ci, j) => row[ci] === picking()!.v[j]);
+  let down = { x: 0, y: 0 };
+  const pickAt = (e: MouseEvent, p: number) => {
+    const t = e.target as Element, ci = t.closest('td')?.cellIndex;
+    // a link opens; a press that moved was a drag
+    if (ci == null || t.closest('a') || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
+    const row = rowAt(p), c = columns()[ci];
+    const at = summarized(c) ? columns().flatMap((x, i) => (summarized(x) ? [] : [i])) : [ci];
+    if (at.length) store.pickFields(el(), JSON.stringify({ i: at, v: at.map((i) => row[i]) }), at.map((i) => ({ ref: columns()[i].field, value: row[i], datePart: columns()[i].datePart })));
+  };
+
   /** What the columns are sized from: the header, the totals and a sample of rows. */
   const cols = createMemo(() =>
     columns().map((c, i) => {
@@ -277,7 +294,7 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
       title={el().title}
       grid={el().grid}
       show={columns().length}
-      class="d-table"
+      class={`d-table ${picking() ? 'd-has-pick' : ''}`}
       cols={cols()}
       virtual={virtual}
       head={
@@ -308,7 +325,7 @@ export const TableWidget: Component<{ element: TableElement }> = (props) => {
           const row = createMemo(() => rowAt(p));
           return (
             // the row's parity in the whole table, for banded rows (only the rows in view are drawn)
-            <tr class={p % 2 ? 'odd' : ''} data-p={p}>
+            <tr class={`${p % 2 ? 'odd' : ''} ${isPicked(row()) ? 'c-on' : ''}`} data-p={p} onPointerDown={(e) => (down = { x: e.clientX, y: e.clientY })} onClick={(e) => pickAt(e, p)}>
               {cellsOf(row())}
             </tr>
           );

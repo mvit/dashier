@@ -310,7 +310,8 @@ export function xyChart(d: XYData) {
         if (!visible) continue;
         const cx = px(c, v);
         const cy = py(c, v);
-        if (d.markers || (d.markers !== false && span >= 12 && !s.area)) dots += `<circle cx="${num(cx)}" cy="${num(cy)}" r="${num(Math.max(3, lineWidth + 1))}"/>`;
+        const dot = d.markers || (d.markers !== false && span >= 12 && !s.area);
+        dots += `<circle cx="${num(cx)}" cy="${num(cy)}" r="${dot ? num(Math.max(3, lineWidth + 1)) : 0}" data-i="${i}"/>`;
         const label = text(labelled[index][i], TINY);
         if (label.height > 0) {
           const half = label.width / 2;

@@ -59,7 +59,6 @@ input[type="search"]:focus { outline: 2px solid var(--selection); outline-offset
 .ed-title:focus, .d-title-input:focus { border-color: var(--selection); outline: none; background: var(--field); }
 .ed-btn { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t-l); font-weight: 500; color: var(--ink-2); border: 1px solid transparent; border-radius: var(--r-l); padding: 0 11px; white-space: nowrap; height: 30px; }
 .ed-btn:hover, .d-freset:hover, .d-tool-btn:hover, .d-tabs-arrow:hover, .d-bottom-tab:hover, .d-add-page-btn:hover, .d-zoom .d-status-btn:hover { background: var(--chrome-2); color: var(--ink); }
-.d-drawer-btn.active { background: var(--chrome-2); color: var(--selection); }
 .ed-btn-icon { width: 30px; justify-content: center; }
 .d-icon { width: 16px; height: 16px; flex: none; }
 .ed-btn-cluster { display: flex; gap: var(--s1); }
@@ -258,10 +257,10 @@ input[type="search"] { background:var(--chrome-2) url("data:image/svg+xml,%3Csvg
 .d-table th, .d-table td, .d-legend span, .d-tip-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d-slicer-clear:hover, .d-matrix-toggle:hover { color: var(--ink); }
 .d-chart-empty.d-error { font-family: ui-monospace, Menlo, Consolas, monospace; }
-.d-card-widget { container-type: inline-size; height: 100%; padding: 12px 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 2px; }
-.card-value { font-size: var(--callout-size, clamp(18px, 14cqw, 36px)); font-weight: 700; letter-spacing: -0.6px; line-height: 1.15; white-space: nowrap; color: var(--callout-color, var(--accent)); }
+.d-card-widget { container-type: size; height: 100%; padding: 12px 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 2px; }
+.card-value { font-size: var(--callout-size, clamp(18px, min(14cqw, 30cqh), 48px)); font-weight: 700; letter-spacing: -0.6px; line-height: 1.15; white-space: nowrap; color: var(--callout-color, var(--accent)); }
 .d-card-widget.left { align-items: flex-start; text-align: left; }
-.card-title { font-size: 12px; color: var(--muted); }
+.card-title { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .card-compare { font-size: 12px; font-weight: 600; color: var(--muted); }
 .card-compare.up { color: var(--r-positive); }
 .card-compare.down { color: var(--r-negative); }
@@ -269,7 +268,7 @@ input[type="search"] { background:var(--chrome-2) url("data:image/svg+xml,%3Csvg
 .d-chart-widget, .d-table-widget, .d-slicer { padding: 12px 14px; display: flex; flex-direction: column; height: 100%; }
 .d-chart-widget { width: 100%; position: relative; }
 .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.chart-title, .d-slicer-title, .markdown-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.chart-title, .d-slicer-title, .markdown-title { font-size: 14px; font-weight: 700; color: var(--ink); }
 /* Table */
 .d-table-widget { gap: 8px; }
 .table-container { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; } /* no scroll anchoring: rows are swapped while scrolling */
@@ -289,6 +288,8 @@ input[type="search"] { background:var(--chrome-2) url("data:image/svg+xml,%3Csvg
 .d-table tfoot td { box-shadow: 0 1px var(--surface); position: sticky; bottom: 0; z-index: 2; font-weight: 700; background: var(--surface); border-top: 1px solid var(--muted); border-bottom: 0; }
 .d-table a { color: var(--accent); }
 .td-left { text-align: left; }
+.d-table tbody td { cursor: pointer; }
+.d-table.d-has-pick tbody tr:not(.c-on) td { opacity: 0.4; }
 .td-right { text-align: right; }
 .td-center { text-align: center; }
 
@@ -364,6 +365,8 @@ input[type="search"] { background:var(--chrome-2) url("data:image/svg+xml,%3Csvg
 /* Every button with text; the top bar's primary also carries the unsaved-changes dot */
 .btn-primary, .btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); white-space: nowrap; position: relative; }
 .d-drawer-btn { display: none; }
+.d-pick-chip { display: inline-flex; align-items: center; gap: var(--s2); flex-shrink: 0; height: 28px; padding: 0 var(--s3); font-size: var(--t-m); font-weight: 500; white-space: nowrap; color: var(--selection); background: color-mix(in srgb, var(--selection) 12%, transparent); border-radius: 14px; }
+.d-pick-float { display: none; }
 .btn-secondary { min-height: var(--control); background: var(--surface); color: var(--ink); border: 1px solid var(--line); padding: 0 var(--s3); border-radius: var(--r-s); font-size: var(--t-m); }
 
 /* 6. PELE CHARTS, THEME EDITOR */
@@ -372,9 +375,11 @@ input[type="search"] { background:var(--chrome-2) url("data:image/svg+xml,%3Csvg
 .d-chart-svg, .d-chart-plot .d-chart-empty { position: absolute; inset: 0; }
 .d-chart-svg > svg { display: block; width: 100%; height: 100%; }
 /* a bar, slice or block can be clicked to filter the page; the others step back from the picked one */
-.pickable :is(.c-bars rect, .c-slice, .c-leaf) { cursor: pointer; }
+.pickable :is(.c-bars rect, .c-slice, .c-leaf, .c-line, .c-area) { cursor: pointer; }
+.c-picked .c-line circle.c-on { r: 5px; stroke: var(--surface); stroke-width: 2px; }
 .pickable text { pointer-events: none; }
 .c-picked :is(.c-bars rect, .c-slice, .c-leaf):not(.c-on) { opacity: 0.3; }
+.d-unconnected { height: 100%; flex-direction: column; gap: var(--s2); }
 .d-chart-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; color: var(--muted); font-size: 12px; }
 .d-chart-empty.d-error { color: var(--r-negative); font-size: 11px; }
 
@@ -576,8 +581,12 @@ kbd { margin-left: auto; padding-left: var(--s3); font: inherit; font-size: var(
 .mode-phone .d-bottom-pages-bar { position: fixed; inset: auto 0 0; z-index: 59; height: auto; padding: var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom)); }
 .mode-phone .d-page-tabs-list { flex: 1; height: var(--row); }
 .mode-phone .d-bottom-tab { padding: 0 var(--s4); }
-.mode-phone .d-drawer-btn { display: inline-flex; position: fixed; top: max(var(--s3), env(safe-area-inset-top)); right: var(--s3); min-height: var(--row); padding: 0 var(--s4); z-index: 61; background: var(--surface); border-color: var(--line); box-shadow: var(--shadow-m); }
+.mode-phone .d-drawer-btn { display: inline-flex; position: fixed; top: max(var(--s3), env(safe-area-inset-top)); right: var(--s3); min-height: var(--row); padding: 0 var(--s4); z-index: 61; box-shadow: var(--shadow-m); }
+.mode-phone .d-drawer-btn.btn-secondary { background: var(--surface); border-color: var(--line); }
+/* a tap shows the control's own pressed state, not the browser's tint */
+.mode-phone * { -webkit-tap-highlight-color: transparent; }
 .mode-phone .d-drawer { position: fixed; inset: 0; z-index: 60; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s3); padding: calc(var(--row) + 2 * var(--s3)) var(--s3) calc(var(--s3) + env(safe-area-inset-bottom)); background: var(--r-bg); color: var(--ink); }
+.mode-phone .d-pick-float { display: inline-flex; position: fixed; top: max(var(--s3), env(safe-area-inset-top)); left: var(--s3); height: var(--row); z-index: 61; background: var(--surface); box-shadow: var(--shadow-m); }
 /* in its card, a slicer is its list or inputs: the card has its name and its clear button */
 .d-drawer .d-slicer { height: auto; padding: 0; }
 .d-drawer .d-slicer-header { display: none; }
