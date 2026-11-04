@@ -4,8 +4,8 @@ Downloads the current Dashier editor, the template every report is built from.
 
     python3 get_dashier.py [OUT.html]        (default: dashier.html)
 
-Tries the site first, then the copy in the GitHub repository. Read the EDITING GUIDE comment in its head; never
-the packed app below it. build_report.py calls this itself when it is given no template.
+Tries the site first, then the copy in the GitHub repository. Never read the packed app in it. build_report.py
+calls this itself when it is given no template.
 """
 import sys, urllib.request
 

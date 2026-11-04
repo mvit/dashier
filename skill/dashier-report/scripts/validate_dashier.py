@@ -7,8 +7,9 @@ Optional: --render opens every page in headless Chromium and fails a visual that
 fields", a card showing a dash, "—"). It needs Playwright for Python (pip install playwright; python3 -m playwright install
 chromium, or CHROME_PATH=<a Chrome or Edge>), so it is opt-in.
 
-FAIL lines are defects (a visual that will be empty or wrong, a model that inflates or drops rows).
-WARN lines are judgment calls: fix them unless the report has a stated reason not to.
+FAIL lines are defects (a visual that will be empty or wrong, a model that inflates or drops rows): fix them.
+WARN lines are about the model and its data (keys, relationships, types, measures): fix them unless there's a reason.
+--style also lists notes on how pages read (text, titles, sizes): optional polish, not needed to deliver.
 """
 import json, os, re, sys
 from collections import Counter
@@ -16,14 +17,15 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dashier_data import ISO_DATE, NUM, NUMERIC, cell, date_part, day_first, js_str, key_text, number, to_iso, unpack
 
-args = [a for a in sys.argv[1:] if a != '--render']
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
 html = open(args[0], encoding='utf-8').read()
 m = re.search(r'<script type="application/dashier\+json" id="dashier-doc">(.*?)</script>', html, re.S)
 if not m:
     sys.exit('FAIL: no dashier-doc block')
 raw = m.group(1)
 fails, warns = [], []
-F, W = fails.append, warns.append
+style = []
+F, W, S = fails.append, warns.append, style.append
 if '<' in raw:
     F('a raw "<" inside the JSON: write it as \\u003c')
 doc = json.loads(raw)
@@ -384,6 +386,9 @@ for p in pages:
     if not els:
         F(f'page "{pt}" is empty')
     check_filters(f'page "{pt}"', p.get('filters'))
+    slicers = sum(e.get('type') == 'slicer' for e in els)
+    if slicers > 3:
+        W(f'page "{pt}" has {slicers} slicers: keep the 3 its question turns on; a scope for every page is a document filter, written once')
     cells = {}
     for e in els:
         eid, ty, home = e.get('id'), e.get('type'), e.get('sourceId')
@@ -403,7 +408,7 @@ for p in pages:
                     continue
                 break
             if y + h > rows_per_page:
-                W(f'{where} runs past the page (rows 0-{rows_per_page - 1} fit; the page grows and viewers must pan)')
+                S(f'{where} runs past the page (rows 0-{rows_per_page - 1} fit; the page grows and viewers must pan)')
         check_filters(where, e.get('filters'))
         g = e.get('grid') or {}
         if g.get('density') not in (None, 'compact', 'roomy') or g.get('lines') not in (None, 'both', 'none'):
@@ -418,7 +423,7 @@ for p in pages:
                 F(f'{where}: options.format {o["format"]}')
             x = (e.get('mapping') or {}).get('x')
             if e.get('chartType') in ('pie', 'donut') and not o.get('topN') and x and len(distinct(e.get('sourceId'), x)) > 6:
-                W(f'{where}: a pie reads best with 6 slices or fewer; set options.topN')
+                S(f'{where}: a pie reads best with 6 slices or fewer; set options.topN')
             for key, allowed in (('legendPosition', ('bottom', 'top', 'right', 'left')), ('units', tuple(UNITS)), ('stack', ('stacked', 'percent'))):
                 if o.get(key) is not None and o[key] not in allowed:
                     F(f'{where}: options.{key} is one of {list(allowed)}')
@@ -439,7 +444,7 @@ for p in pages:
             if cmp.get('field'):
                 refs.append(cmp['field'])
             if typed_numbers((e.get('subtitle') or '') + ' ' + (e.get('title') or '')):
-                W(f'{where}: a figure in the title or subtitle: if it comes from the data, it goes stale (bind it in a text box)')
+                S(f'{where}: a figure in the title or subtitle: if it comes from the data, it goes stale (bind it in a text box)')
         elif ty == 'table':
             refs = [c.get('field') for c in e.get('columns') or []]
             if not refs:
@@ -466,7 +471,7 @@ for p in pages:
             c = e.get('content', '')
             b = e.get('bindings') or {}
             if typed_numbers(c):
-                W(f'{where}: typed figures in the text: bind any that come from the data or change with filters')
+                S(f'{where}: typed figures in the text: bind any that come from the data or change with filters')
             for err in template_errors(c):
                 F(f'{where}: {err}')
             for v, bd in b.items():
@@ -488,9 +493,9 @@ for p in pages:
                 # what the binding writes: its format and units, else its measure's
                 mm = next((m for (mt, n), m in mnames.items() if fld and n == fld[1:-1]), {})
                 if not bd.get('compare') and (bd.get('format') or mm.get('format')) == 'currency' and re.search(r'[$€£]\s*\{\{\s*' + re.escape(v) + r'\b', c):
-                    W(f'{where}: a $ typed before currency-formatted {v} shows twice')
+                    S(f'{where}: a $ typed before currency-formatted {v} shows twice')
                 if not bd.get('compare') and (bd.get('units') or mm.get('units')) and re.search(r'\{\{\s*' + re.escape(v) + r'\s*\}\}\s*[KMB]\b', c):
-                    W(f'{where}: {v} already shows its display units (K, M, B); a typed one shows twice')
+                    S(f'{where}: {v} already shows its display units (K, M, B); a typed one shows twice')
             for v in re.findall(r'\{\{\{?[#^&]?\s*([A-Za-z_]\w*)', outside_sections(c)):
                 if v not in b and v not in src and v not in ('title', 'page', 'rows'):
                     F(f'{where}: {{{{ {v} }}}} has no binding')
@@ -512,11 +517,11 @@ if left or doc.get('title') == 'Dashier tutorial' or {'sales', 'regions'} <= set
 for p in pages:
     for e in p.get('elements') or []:
         if e.get('type') == 'markdown' and e.get('h', 0) >= 5 and e.get('w', 12) <= 4:
-            W(f'page "{p.get("title")}": {e.get("id")} is a tall text column like the tutorial\'s; fine if deliberate')
+            S(f'page "{p.get("title")}": {e.get("id")} is a tall text column like the tutorial\'s; fine if deliberate')
 if dims and facts and not used_dims:
     W('no visual uses a dimension attribute ("dim_x.field"): group and label by the dimensions')
 if '—' in raw or '–' in raw:
-    W('an em or en dash in the text')
+    S('an em or en dash in the text')
 
 
 # --- optional: render every page and fail visuals that come out empty ------------------------------------------
@@ -548,9 +553,11 @@ if '--render' in sys.argv:
             browser.close()
 
 print(f'tables={len(src)} (facts {len(facts)}, dims {len(dims)}) relationships={len(rels)} measures={len(measures)} pages={len(pages)}')
-for w in warns:
-    print('WARN:', w)
 for f in fails:
     print('FAIL:', f)
+for w in warns:
+    print('WARN:', w)
+for n in style if '--style' in sys.argv else []:
+    print('STYLE:', n)
 print('RESULT:', 'FAIL' if fails else 'PASS')
 sys.exit(1 if fails else 0)
