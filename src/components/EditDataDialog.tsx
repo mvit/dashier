@@ -4,10 +4,11 @@ import { Modal } from './Modal';
 import { Seg, Err, blurOnEnter } from './ui';
 import { DashRelationship, FieldType, isNumericType } from '../types/model';
 import { DataGrid } from './DataGrid';
-import { frameRows } from '../runtime/frames';
+import { frameFields, frameRows, reader } from '../runtime/frames';
 import { fieldStats } from '../runtime/charts';
 import { payloadSize } from '../runtime/payloads';
 import { plural } from '../runtime/data';
+import { downloadCSV } from '../runtime/save';
 
 type Tab = 'data' | 'relationships';
 
@@ -73,6 +74,11 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
   const [error, setError] = createSignal('');
   const src = () => store.doc.sources[id()];
   const frame = () => store.tableFrame(id());
+  /** The table as a CSV file: its columns and values as stored, so Replace data… takes it back as it was. */
+  const exportCSV = () => {
+    const f = frame(), names = frameFields(f), reads = names.map((n) => reader(f, n)!);
+    downloadCSV(id(), [names, ...Array.from({ length: f.length }, (_, k) => reads.map((r) => String(r(k) ?? '')))]);
+  };
   // the grid shows the first rows as objects; the table itself stays in columns (its counts are read from them)
   const gridRows = createMemo(() => frameRows(frame(), 0, 200));
   const uses = createMemo(() => store.columnUses(id()));
@@ -191,6 +197,9 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
           </div>
         </div>
         <div class="d-editdata-actions">
+          <button class="btn-secondary" title="Download this table as a CSV file, to edit and bring back with Replace data…" onClick={exportCSV}>
+            Export CSV
+          </button>
           <button class="btn-secondary d-replace-btn" title="Update this table from a CSV or JSON file" onClick={props.onReplace}>
             Replace data…
           </button>

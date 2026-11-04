@@ -426,6 +426,15 @@ const openFile = async (p, file) => {
   await page.keyboard.press('Escape');
 
   await editData('regional_metrics');
+  await page.evaluate(() => {
+    const make = URL.createObjectURL;
+    window.__csv = null;
+    URL.createObjectURL = (b) => (b.text().then((t) => (window.__csv = t)), make(b));
+  });
+  await page.$$eval('.d-editdata-actions button', (b) => b.find((x) => x.textContent.includes('Export CSV')).click());
+  await page.waitForFunction(() => window.__csv != null);
+  const dataCsv = (await page.evaluate(() => window.__csv)).split('\n');
+  check('Edit Data exports the table as CSV: its columns, then every row', dataCsv[0] === 'region,quarter,revenue,active_users' && dataCsv.length === 17, dataCsv.slice(0, 2).join(' / '));
   check('Edit Data shows the data with each column\'s type', (await page.$$('.modal-dialog thead th[data-col]')).length === 4 && (await page.$$('.modal-dialog tbody tr')).length === 16 && (await rowOf('revenue')).type === 'float');
   const revenueStats = (await rowOf('revenue')).stats;
   check('hovering a column shows its counts: blanks, distinct values, its range', /^0 blank · \d+ distinct · [\d,.]+ to [\d,.]+$/.test(revenueStats) && !(await page.$('.modal-dialog thead .d-col-blank')), revenueStats);
