@@ -15,7 +15,6 @@ import { PickChip } from './TopBar';
 
 // Must match .d-visuals-grid in theme.css
 const ROW_H = 85;
-const GAP = 14;
 const HANDLES = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
 // Must match .d-canvas-scroll-container padding
 const VIEW_PAD = 24;
@@ -188,8 +187,9 @@ export const Canvas: Component = () => {
     e.stopPropagation();
     store.setSelectedElementId(elem.id);
     // pointer travel is measured on the sheet (unscaled px), so a zoom that changes mid-drag (Fit page) doesn't drift
-    const colW = (gridRef.offsetWidth + GAP) / 12;
-    const rowH = ROW_H + GAP;
+    const gap = store.reportTheme().spacing;
+    const colW = (gridRef.offsetWidth + gap) / 12;
+    const rowH = ROW_H + gap;
     const at = (ev: PointerEvent) => {
       const r = gridRef!.getBoundingClientRect();
       return { px: (ev.clientX - r.left) / zoom(), py: (ev.clientY - r.top) / zoom() };

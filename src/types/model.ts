@@ -28,13 +28,15 @@ export interface DashTheme {
   surface?: string; // visual tiles
   text?: string;
   muted?: string; // secondary text and axes
-  border?: string; // gridlines and table rules (visuals have no outer border)
+  border?: string; // the visuals' outlines
+  lines?: string; // inside visuals: gridlines, axes, table and matrix rules
   accent?: string; // KPI values and gauges
   positive?: string; // a comparison that's good news (up, or down where lower is better)
   negative?: string; // a comparison that's bad news, and a visual's error
   palette?: string[]; // series colors, up to 8
   font?: string; // CSS font-family
   radius?: number; // tile corner radius, px
+  spacing?: number; // space between visuals, px (default 14)
 }
 
 export type ResolvedTheme = Required<DashTheme> & { dark: boolean };
@@ -43,11 +45,11 @@ const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, 
 
 const BASE = {
   light: {
-    background: '#F3F5F9', surface: '#FFFFFF', text: '#1E2A3A', muted: '#5B6472', border: '#E3E8EF', accent: '#3B6FD8', positive: '#15934F', negative: '#D23F3F',
+    background: '#F3F5F9', surface: '#FFFFFF', text: '#1E2A3A', muted: '#5B6472', border: '#E3E8EF', lines: '#E3E8EF', accent: '#3B6FD8', positive: '#15934F', negative: '#D23F3F',
     palette: ['#3B6FD8', '#10B981', '#F2B53A', '#E5605E', '#5AB4D6', '#8E62C9', '#F08A4B', '#2E9E83']
   },
   dark: {
-    background: '#14181F', surface: '#1E242D', text: '#E7EAF0', muted: '#8B95A4', border: '#2E3540', accent: '#7AA5F5', positive: '#10B981', negative: '#EE6666',
+    background: '#14181F', surface: '#1E242D', text: '#E7EAF0', muted: '#8B95A4', border: '#2E3540', lines: '#2E3540', accent: '#7AA5F5', positive: '#10B981', negative: '#EE6666',
     palette: ['#5B8DEF', '#10B981', '#F2B53A', '#EE6666', '#73C0DE', '#B084DB', '#FC8452', '#3BA272']
   }
 };
@@ -57,8 +59,10 @@ export function resolveTheme(theme?: DashTheme): ResolvedTheme {
   const t = theme || {};
   const dark = t.mode === 'dark' || (t.mode === 'auto' && !!globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches);
   const base = BASE[dark ? 'dark' : 'light'];
-  const r: ResolvedTheme = { ...base, mode: t.mode || 'light', font: t.font || FONT, radius: t.radius ?? 0, dark };
-  for (const k of ['background', 'surface', 'text', 'muted', 'border', 'accent', 'positive', 'negative'] as const) r[k] = t[k] || base[k];
+  const r: ResolvedTheme = { ...base, mode: t.mode || 'light', font: t.font || FONT, radius: t.radius ?? 0, spacing: t.spacing ?? 14, dark };
+  for (const k of ['background', 'surface', 'text', 'muted', 'border', 'lines', 'accent', 'positive', 'negative'] as const) r[k] = t[k] || base[k];
+  // lines follow the borders unless set apart
+  r.lines = t.lines || t.border || base.lines;
   if (t.palette?.length) r.palette = t.palette;
   return r;
 }

@@ -111,7 +111,7 @@ export const FormatPane: Component = () => {
       F.select('Units', 'units', [[undefined, 'As its measure'], ...UNIT_CHOICES.slice(1)]),
       F.num('Size', 'callout.size', 'fits', 10, 120),
       F.color('Color', 'callout.color'),
-      F.seg('Align', 'callout.align', [['left', 'Left'], [undefined, 'Center']])
+      F.seg('Align', 'callout.align', [[undefined, 'Left'], ['center', 'Center']])
     ]));
     add(t === 'card', sec('subtitle', 'Subtitle and comparison', [F.text('Subtitle', 'subtitle', 'None', true), !!e.compare && F.text('Comparison', 'compare.label', 'vs 2024', true)]));
 

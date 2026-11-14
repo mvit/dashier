@@ -77,7 +77,7 @@
       refLines?:[{value | stat:"average"|"median"|"min"|"max" (of the first series), label?, color?}],
       donutHole? (0.2-0.85)}
     card     aggregation:{method:Aggregate, field}, format?, units?, subtitle? (static), compare?:Compare,
-      callout?:{size? (px), color?, align?:"left"}
+      callout?:{size? (px), color?, align?:"center"} (default left: name on top, then the number)
     table    columns?:[{field, label?, format?:Format|"date", units?, aggregate?, showAs?:"percent-of-total",
       datePart?, cond?:"scale"|"bars"}] (with any column aggregated, one row per combination of the
       others), totals?:false, grid?:Grid
@@ -121,9 +121,10 @@
   DatePart "year"|"quarter"|"month"|"day"
   Filter   { field, table, values?:["…"] | min?, max? | from?, to? (ISO, inclusive) | last:{n, unit:"day"|"week"|"month"|
     "year"} | values + datePart ("2024 Q1") }. Reaches other tables through relationships; empty values = all.
-  Theme    report only: { mode:"light"|"dark"|"auto", background, surface (tiles), text, muted, border, accent,
+  Theme    report only: { mode:"light"|"dark"|"auto", background, surface (tiles), text, muted, border (tiles' outline),
+    lines (gridlines, axes, table rules), accent,
     positive / negative (a comparison's good and bad news; negative also colors a visual's error), palette:[8 colors],
-    font, radius }
+    font, radius (px), spacing (px between visuals, default 14) }
   -->
 
   <script type="application/dashier+json" id="dashier-doc">

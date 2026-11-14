@@ -10,7 +10,8 @@ const COLORS = [
   ['surface', 'Tiles'],
   ['text', 'Text'],
   ['muted', 'Secondary text'],
-  ['border', 'Lines'],
+  ['border', 'Borders'],
+  ['lines', 'Lines'],
   ['accent', 'Accent'],
   ['positive', 'Positive'],
   ['negative', 'Negative']
@@ -60,7 +61,7 @@ export const ThemeEditor: Component = () => {
     const [k, i] = path.split('.');
     if (k === 'canvas') return store.setCanvas(resolveCanvas(v));
     if (k === 'currency') return store.setReportCurrency(v ?? CURRENCIES[0]);
-    if (!i) return store.setTheme({ [k]: v === '' || v === (k === 'radius' ? 0 : (base() as any)[k]) ? undefined : v });
+    if (!i) return store.setTheme({ [k]: v === '' || v === (base() as any)[k] ? undefined : v });
     const palette = [...(store.doc.theme?.palette ?? base().palette)];
     palette[+i] = v ?? base().palette[+i];
     store.setTheme({ palette: palette.join() === base().palette.join() ? undefined : palette });
@@ -93,7 +94,7 @@ export const ThemeEditor: Component = () => {
     ]),
     // unset, a series has the color it's drawn in (a shorter palette repeats)
     sec('theme-series', 'Series colors', base().palette.map((_, i) => F.color(`Series ${i + 1}`, `palette.${i}`, () => store.reportTheme().palette[i % store.reportTheme().palette.length]))),
-    sec('theme-font', 'Font and corners', [F.text('Font', 'font', 'System default', false, FONTS), F.range('Corners', 'radius', 0, 24, 1, 0, px)]),
+    sec('theme-font', 'Font, corners and spacing', [F.text('Font', 'font', 'System default', false, FONTS), F.range('Corners', 'radius', 0, 24, 1, 0, px), F.range('Spacing', 'spacing', 0, 40, 1, 14, px)]),
     sec('theme-page', 'Page size', pageRows()),
     // the currency every "Currency" format is in
     sec('theme-currency', 'Numbers', [F.select('Currency', 'currency', CURRENCIES.map((c): [string | undefined, string] => {

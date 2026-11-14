@@ -27,7 +27,7 @@ export const CardWidget: Component<{ element: CardElement }> = (props) => {
 
   return (
     <div
-      class={`d-card-widget ${el().callout?.align === 'left' ? 'left' : ''}`}
+      class={`d-card-widget ${el().callout?.align === 'center' ? 'center' : ''}`}
       style={{ '--callout-size': el().callout?.size ? `${el().callout!.size}px` : undefined, '--callout-color': el().callout?.color }}
     >
       <Show when={field()} fallback={empty('Drag a field here')}>

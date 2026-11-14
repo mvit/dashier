@@ -56,7 +56,7 @@ y1 ┌ hbar sorted, topN, w6 ┐┌ table w6 ┐ h7 y1 ┌──── table or 
 - Titles say what a chart shows or the finding it proves, as long as it holds under any filter; numbers never go
   in a title (it can't update): they go in bound text.
 - **Theme on purpose:** a quiet `background` slightly darker than the tile `surface` (`#f9f9f7` / `#fcfcfb`, or a
-  dark pair), near-black `text`, soft `border`, `radius` 6 to 8, a `palette` of distinct hues.
+  dark pair), near-black `text`, a soft `border` (the tiles' outline) and `lines` (gridlines, axes, table rules), `radius` 6 to 8, a `palette` of distinct hues.
 - **KPIs with context:** a card's `compare` (`{"shift": "period"}` or `"year"`, `show`: change for amounts,
   difference for rates, `invert: true` for costs). The card's date filter (`{"table": "dim_date", "field": "date",
   "datePart": "quarter", "values": ["2025 Q4"]}`) or a date slicer with `datePart` on the page is what moves; a text
@@ -89,7 +89,7 @@ All elements: `id` (unique), `type`, `x` 0..11, `y`, `w` 1..12 (x + w ≤ 12), `
   min, max, format, units, sort (value-desc | value-asc | label), topN, stack (stacked | percent); valueAxis,
   categoryAxis, gridlines (false hides), colors (`{"Services": "#ef4444"}`), varyColors, barWidth (0.2 to 1),
   barRadius, lineWidth, markers, donutHole, refLines (`[{"stat": "average"}]`, `[{"value": 4e11, "label": "Target"}]`).
-- **card:** `aggregation: {method, field}`, `format`, `units`, `callout: {size, color, align}`, `subtitle` (static),
+- **card:** `aggregation: {method, field}`, `format`, `units`, `callout: {size, color, align}` (left by default, its name above the number; `"center"` centers it), `subtitle` (static),
   `compare: {shift | filters | field, show, label, invert}`. min/max/first/last/mode also read text and dates.
 - **table:** `columns: [{field, label, format (number | integer | currency | percent | date | string), units,
   aggregate, showAs, datePart, cond}]` (required), `totals`, `grid: {density (compact | roomy), banded, lines (both |
@@ -100,8 +100,8 @@ All elements: `id` (unique), `type`, `x` 0..11, `y`, `w` 1..12 (x + w ≤ 12), `
 - **slicer:** `field` of `sourceId`, `style` list | dropdown | tiles | range, `single`, `datePart`, `selection`.
 - **markdown:** `content`, `bindings`, `textSize`, `align` ([text.md](text.md)).
 
-Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`, `text`, `muted`, `border`,
-`accent`, `positive`, `negative`, `palette` [8 colors], `font`, `radius`), `canvas` (`{"width": 1440, "height":
+Document: `title`, `theme` (`mode` light | dark | auto, `background`, `surface`, `text`, `muted`, `border`, `lines`,
+`accent`, `positive`, `negative`, `palette` [8 colors], `font`, `radius`, `spacing` (px between visuals, default 14)), `canvas` (`{"width": 1440, "height":
 810}`; portrait `1080×1440`, A4 `1123×794`), `currency`, `filters` (every page), `relationships`, `measures`,
 `pages` (`id`, `title`, `elements`, `filters`). `report.html#<page id>` opens a page; `#preview` hides the editor;
 `#fit` fits the page to the window.

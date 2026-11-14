@@ -10,17 +10,19 @@ export function reportStyle(t: ResolvedTheme): Record<string, string> {
   const vars: Record<string, string> = {
     '--r-bg': t.background,
     '--r-radius': `${t.radius}px`,
+    '--r-spacing': `${t.spacing}px`,
     '--surface': t.surface,
     '--field': t.surface,
     '--ink': t.text,
     '--ink-2': t.text,
     '--muted': t.muted,
-    '--line': t.border,
+    '--line': t.lines,
+    '--r-border': t.border,
     '--chrome-2': mix(6),
     '--accent': t.accent,
     '--r-positive': t.positive,
     '--r-negative': t.negative,
-    '--gridline': mix(12),
+    '--gridline': t.lines,
     'font-family': t.font
   };
   for (let i = 0; i < 8; i++) vars[`--series-${i + 1}`] = t.palette[i % t.palette.length];

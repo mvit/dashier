@@ -1260,7 +1260,7 @@ const openFile = async (p, file) => {
   const sheet = () => page.$eval('.d-canvas-sheet', (e) => getComputedStyle(e).backgroundColor);
   const chrome0 = await chrome(), sheet0 = await sheet();
   const reportCards = await page.$$eval('.d-visualizations-pane .d-fsec .d-card-title', (ts) => ts.map((t) => t.textContent));
-  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font and corners,Page size,Numbers' && !!(await page.$('.d-visualizations-pane .d-ftools .btn-secondary')), reportCards.join());
+  check('the report\'s settings are cards, as a visual\'s format is (no presets, a reset)', reportCards.join() === 'Colors,Series colors,Font, corners and spacing,Page size,Numbers' && !!(await page.$('.d-visualizations-pane .d-ftools .btn-secondary')), reportCards.join());
   await fpick('Colors', 'Appearance', 'Dark');
   await sleep(100);
   check('a dark base restyles the report', (await sheet()) !== sheet0, `${sheet0} → ${await sheet()}`);
