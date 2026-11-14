@@ -1,8 +1,8 @@
-import { Component, For, JSX, Show, createMemo, createSignal } from 'solid-js';
+import { Component, Show, createMemo, createSignal } from 'solid-js';
 import { store } from '../runtime/store';
 import { Modal } from './Modal';
-import { Seg, Err, blurOnEnter } from './ui';
-import { DashRelationship, FieldType, isNumericType } from '../types/model';
+import { Err, blurOnEnter } from './ui';
+import { FieldType } from '../types/model';
 import { DataGrid } from './DataGrid';
 import { frameFields, frameRows, reader } from '../runtime/frames';
 import { fieldStats } from '../runtime/charts';
@@ -10,67 +10,11 @@ import { payloadSize } from '../runtime/payloads';
 import { plural } from '../runtime/data';
 import { downloadCSV } from '../runtime/save';
 
-type Tab = 'data' | 'relationships';
-
-
-/** Cardinality as the editor shows it, from this table to the other: many to one, one to one, one to many, many to many. */
-type Card = '*:1' | '1:1' | '1:*' | '*:*';
-const CARDS: [Card, string][] = [['*:1', 'Many to one'], ['1:1', 'One to one'], ['1:*', 'One to many'], ['*:*', 'Many to many']];
-/** A relationship being edited, seen from this table (`index` −1: a new one). */
-type Draft = { index: number; mine: string; table: string; field: string; card: Card; both: boolean };
-
 /**
- * A relationship as a card: this table's column, the cardinality, the other table's column; under them the cross
- * filter direction, then `children` (a new one's buttons go in a footer instead).
+ * Edit Data: rename the table and its columns, change column types, and see what uses it.
  */
-const RelCard: Component<{
-  table: string;
-  d: Draft;
-  flow: string;
-  draft?: boolean;
-  set: (patch: Partial<Draft>) => void;
-  children: JSX.Element;
-}> = (props) => {
-  const select = (cls: string, title: string, value: string, options: string[], empty: string, onPick: (v: string) => void, label = (o: string) => o) => (
-    <select class={cls} title={title} onChange={(e) => onPick(e.currentTarget.value)}>
-      <Show when={!value}>
-        <option value="">{empty}</option>
-      </Show>
-      <For each={options}>{(o) => <option value={o} selected={o === value}>{label(o)}</option>}</For>
-    </select>
-  );
-  const fields = (t: string) => store.fieldsOf(t).map(c => c.name);
-  return (
-    <div class={`d-rel ${props.draft ? 'd-rel-draft d-rel-form' : ''}`}>
-      <div class="d-rel-grid">
-        <span class="d-rel-table-name">▦ {props.table}</span>
-        <span />
-        {select('d-rel-table d-rel-table-select', 'Other table', props.d.table, Object.keys(store.doc.sources).filter(t => t !== props.table), 'Choose a table…', (table) => props.set({ table }), (t) => `▦ ${t}`)}
-        {select('d-rel-select d-rel-mine', `Column of ${props.table}`, props.d.mine, fields(props.table), 'Choose a column…', (mine) => props.set({ mine }))}
-        {select('d-rel-card', 'Relationship type, detected from the data', props.d.card, CARDS.map(c => c[0]), '', (card) => props.set({ card: card as Card }), (c) => CARDS.find(x => x[0] === c)![1])}
-        {select('d-rel-select d-rel-field', 'Column of the other table', props.d.field, fields(props.d.table), 'Choose a column…', (field) => props.set({ field }))}
-      </div>
-      <div class="d-rel-bottom">
-        <select class="d-rel-select d-rel-dir" title="Filter direction" disabled={props.d.card === '1:1'} onChange={(e) => props.set({ both: e.currentTarget.value === 'both' })}>
-          <option value="single" selected={!props.d.both}>{props.d.card === '1:1' ? 'Filters both ways' : props.flow}</option>
-          <option value="both" selected={props.d.both}>Filters both ways</option>
-        </select>
-        <Show when={!props.draft}>{props.children}</Show>
-      </div>
-      <Show when={props.draft}>
-        <div class="d-rel-foot">{props.children}</div>
-      </Show>
-    </div>
-  );
-};
-
-/**
- * Edit Data: rename the table and its columns, change column types, edit the connections between this
- * table's fields and other tables' fields, and see which visuals use it.
- */
-export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => void; onReplace: () => void }> = (props) => {
+export const EditDataDialog: Component<{ id: string; onClose: () => void; onReplace: () => void; onRelationships: () => void }> = (props) => {
   const [id, setId] = createSignal(props.id); // follows renames
-  const [tab, setTab] = createSignal<Tab>(props.tab ?? 'data');
   const [error, setError] = createSignal('');
   const src = () => store.doc.sources[id()];
   const frame = () => store.tableFrame(id());
@@ -85,7 +29,6 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
   /** How many things (visuals, measures, relationships, filters, sort orders) use the table; the columns none uses. */
   const usedBy = () => new Set([...uses().values()].flat()).size;
   const unused = () => (src()?.structure ?? []).map(c => c.name).filter(n => !uses().get(n)?.length);
-  const rels = () => store.relationshipsOf(id());
 
   /** Shows a store error (or clears it); true when there was none. */
   const ok = (err: string | null) => (setError(err || ''), !err);
@@ -95,78 +38,8 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
     else input.value = id();
   };
 
-  // --- relationships ---
-  const others = () => Object.keys(store.doc.sources).filter(t => t !== id());
-  const [adding, setAdding] = createSignal<Draft | null>(null);
-
-  /** Share of this table's distinct values that also occur in the other table's field. */
-  const matchRate = (mine: string, other: { table: string; field: string }) => {
-    const a = new Set(store.distinct(id(), mine));
-    const b = new Set(store.distinct(other.table, other.field));
-    return a.size ? Math.round(([...a].filter(v => b.has(v)).length / a.size) * 100) : null;
-  };
-
-  /** What the data says, as Power BI tells it: unique on both sides 1:1, on the other only *:1, on this one 1:*, else *:*. */
-  const detect = (mine: string, table: string, field: string): Card => {
-    const a = !store.repeats(id(), mine);
-    const b = !store.repeats(table, field);
-    return a && b ? '1:1' : b ? '*:1' : a ? '1:*' : '*:*';
-  };
-
-  /** A stored relationship as the editor sees it from this table. */
-  const draftOf = (index: number): Draft => {
-    const r = store.doc.relationships![index];
-    const [me, other] = r.from.table === id() ? [r.from, r.to] : [r.to, r.from];
-    const card: Card = r.cardinality === 'one-to-one' ? '1:1' : r.cardinality === 'many-to-many' ? '*:*' : r.from.table === id() ? '*:1' : '1:*';
-    return { index, mine: me.field, table: other.table, field: other.field, card, both: r.crossFilter === 'both' };
-  };
-
-  /** The relationship a draft stands for: the many side is `from`. */
-  const relOf = (d: Draft): DashRelationship => {
-    const me = { table: id(), field: d.mine };
-    const other = { table: d.table, field: d.field };
-    return {
-      ...(d.card === '1:*' ? { from: other, to: me } : { from: me, to: other }),
-      ...(d.card === '1:1' ? { cardinality: 'one-to-one' as const } : d.card === '*:*' ? { cardinality: 'many-to-many' as const } : {}),
-      ...(d.both && d.card !== '1:1' ? { crossFilter: 'both' as const } : {})
-    };
-  };
-
-  /** Which table filters which in one direction: the one side, or for *:* the other table. */
-  const flow = (d: Draft) => (d.card === '1:*' ? `${id()} filters ${d.table || '…'}` : `${d.table || '…'} filters ${id()}`);
-
-  /** The one sides a draft claims whose values repeat (each row then matches their first row only). */
-  const repeated = (d: Draft) =>
-    [...(d.card === '1:*' || d.card === '1:1' ? [[id(), d.mine]] : []), ...(d.card === '*:1' || d.card === '1:1' ? [[d.table, d.field]] : [])]
-      .filter(([t, f]) => f && store.repeats(t, f))
-      .map(([t, f]) => `${t}.${f}`);
-
-  /**
-   * A relationship changed: picking a column (or table) reads the cardinality from the data again. A saved one is
-   * saved at once (a rejected change shows why and keeps the old), a new one waits for Create.
-   */
-  const change = (d0: Draft, patch: Partial<Draft>) => {
-    const d = { ...d0, ...patch };
-    if (patch.table) d.field = store.fieldsOf(d.table).find(c => c.name === d.mine)?.name ?? '';
-    if ((patch.mine || patch.field || patch.table) && d.mine && d.field) d.card = detect(d.mine, d.table, d.field);
-    d.index < 0 ? setAdding(d) : ok(store.saveRelationship(relOf(d), d.index));
-  };
-
-  /** Same-named columns in other tables that aren't connected yet. */
-  const suggestions = () => {
-    const linked = new Set(rels().map(r => `${r.mine.field}|${r.other.table}|${r.other.field}`));
-    return others().flatMap(table =>
-      store.fieldsOf(table).flatMap(c => {
-        const mine = store.fieldsOf(id()).find(m => m.name.toLowerCase() === c.name.toLowerCase());
-        return mine && !linked.has(`${mine.name}|${table}|${c.name}`) && isNumericType(mine.type) === isNumericType(c.type)
-          ? [{ mine: mine.name, table, field: c.name }]
-          : [];
-      })
-    );
-  };
-
   return (
-    <Modal class={`d-editdata ${tab() === 'data' ? 'd-editdata-tall' : ''}`} onClose={props.onClose} ok="Done" onOk={props.onClose}>
+    <Modal class="d-editdata d-editdata-tall" onClose={props.onClose} ok="Done" onOk={props.onClose}>
       <div class="modal-header">
         <div class="d-editdata-title">
           <span class="d-editdata-icon">▦</span>
@@ -197,6 +70,9 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
           </div>
         </div>
         <div class="d-editdata-actions">
+          <button class="btn-secondary" title="How this table connects to the others" onClick={props.onRelationships}>
+            Relationships…
+          </button>
           <button class="btn-secondary" title="Download this table as a CSV file, to edit and bring back with Replace data…" onClick={exportCSV}>
             Export CSV
           </button>
@@ -206,11 +82,8 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
         </div>
       </div>
 
-      <Seg class="d-dialog-seg" value={tab()} options={[['data', 'Data'], ['relationships', <>Relationships <span class="d-seg-count">{rels().length}</span></>]]} set={setTab} />
-
       <Err text={error()} class="d-editdata-error" />
       <Show when={src()}>
-        <Show when={tab() === 'data'}>
           <div class="d-editdata-hint">
             Rename columns or change their types here. Updates apply throughout the report; original values are kept.
           </div>
@@ -228,80 +101,7 @@ export const EditDataDialog: Component<{ id: string; tab?: Tab; onClose: () => v
               }}
             />
           </div>
-        </Show>
-
-        <Show when={tab() === 'relationships'}>
-          <div class="modal-body d-rels-body">
-            <p class="d-editdata-lead">
-              Connect matching columns to use data from both tables in one visual. Choose how filters pass between them.
-            </p>
-            <Show when={rels().length || adding()} fallback={<div class="d-empty-state">No relationships yet.</div>}>
-              <div class="d-rels">
-                <For each={rels()}>
-                  {(r) => {
-                    const d = () => draftOf(r.index);
-                    const rate = () => matchRate(r.mine.field, r.other);
-                    return (
-                      <RelCard table={id()} d={d()} flow={flow(d())} set={(patch) => change(d(), patch)}>
-                        <span class="d-rel-meta">
-                          <Show when={repeated(d()).length}>
-                            <span class="d-badge warn" title="This side needs unique values. Duplicate values match only the first row.">{repeated(d())[0]} repeats values</span>
-                          </Show>
-                          <Show when={store.isNumericRef(id(), r.mine.field) !== store.isNumericRef(r.other.table, r.other.field)}>
-                            <span class="d-badge warn">types differ</span>
-                          </Show>
-                          <Show when={rate() != null}>
-                            <span class={`d-badge ${rate()! < 50 ? 'warn' : 'ok'}`}>{rate()}% match</span>
-                          </Show>
-                        </span>
-                        <button
-                          class="d-rel-x"
-                          title="Delete relationship"
-                          onClick={() => {
-                            const n = store.linkedUsages(r.index).length;
-                            (!n || confirm(`${n} visual${n > 1 ? 's use' : ' uses'} fields through this relationship and will lose them. Delete it?`)) && store.removeRelationship(r.index);
-                          }}
-                        >
-                          ×
-                        </button>
-                      </RelCard>
-                    );
-                  }}
-                </For>
-                <Show when={adding()}>
-                  {(d) => (
-                    <RelCard table={id()} d={d()} flow={flow(d())} draft set={(patch) => change(d(), patch)}>
-                      <button class="btn-secondary" onClick={() => setAdding(null)}>Cancel</button>
-                      <button class="btn-primary" disabled={!d().mine || !d().table || !d().field} onClick={() => ok(store.saveRelationship(relOf(d()))) && setAdding(null)}>
-                        Create
-                      </button>
-                    </RelCard>
-                  )}
-                </Show>
-              </div>
-            </Show>
-            <Show when={!adding()}>
-              {others().length ? (
-                <button class="btn-secondary d-new-rel" onClick={() => setAdding({ index: -1, mine: '', table: '', field: '', card: '*:1', both: false })}>+ New relationship</button>
-              ) : (
-                <p class="d-hint">Add another table (Get data) to relate it to this one.</p>
-              )}
-            </Show>
-            <Show when={suggestions().length}>
-              <div class="d-suggests">
-                <span class="d-suggests-label">Suggested</span>
-                <For each={suggestions()}>
-                  {(x) => (
-                    <button class="d-suggest" title="Connect these columns using the detected relationship type" onClick={() => ok(store.saveRelationship(relOf({ index: -1, ...x, card: detect(x.mine, x.table, x.field), both: false })))}>
-                      {x.mine} ⟷ {x.table}.{x.field}
-                    </button>
-                  )}
-                </For>
-              </div>
-            </Show>
-          </div>
-        </Show>
-
-      </Show>    </Modal>
+      </Show>
+    </Modal>
   );
 };

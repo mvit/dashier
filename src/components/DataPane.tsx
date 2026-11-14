@@ -10,6 +10,7 @@ import { Card, Search } from './ui';
 export const DataPane: Component<{
   onGetData: () => void;
   onEditData: (id: string) => void;
+  onRelationships: () => void;
   onReplaceData: (id: string) => void;
   /** A new measure on a table (from a field), or (with a name) edit that measure. */
   onMeasure: (table: string, name?: string, field?: string) => void;
@@ -20,6 +21,7 @@ export const DataPane: Component<{
     { label: 'Create measure…', onSelect: () => props.onMeasure(id) },
     '-',
     { label: 'Edit data…', onSelect: () => props.onEditData(id) },
+    { label: 'Relationships…', onSelect: props.onRelationships },
     { label: 'Replace data…', onSelect: () => props.onReplaceData(id) },
     '-',
     { label: 'Delete table', danger: true, onSelect: () => deleteTable(id) }

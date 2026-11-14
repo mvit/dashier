@@ -13,6 +13,7 @@ import { AddDataDialog } from './components/AddDataDialog';
 import { EditDataDialog } from './components/EditDataDialog';
 import { Modal } from './components/Modal';
 import { reportStyle } from './runtime/theme';
+import { RelationshipsDialog } from './components/RelationshipsDialog';
 
 /** The project's home, shown in About. */
 const GITHUB = 'https://github.com/mvit/dashier';
@@ -40,9 +41,9 @@ const Pane: Component<{ open: boolean; label: string; class: string; setOpen: (o
 
 export const App: Component = () => {
   // At most one dialog at a time: adding a table, editing the named one, replacing its data, a measure, or About.
-  const [dialog, setDialog] = createSignal<{ add?: true; edit?: string; replace?: string; measure?: { table: string; name?: string; field?: string }; about?: true; exportJSON?: true; tab?: 'relationships' } | null>(null);
+  const [dialog, setDialog] = createSignal<{ add?: true; edit?: string; replace?: string; measure?: { table: string; name?: string; field?: string }; about?: true; exportJSON?: true; rels?: [string, string] | true } | null>(null);
   // a visual asking for its tables to be connected opens its table's connections
-  createEffect(() => { const t = store.connecting(); if (t) (setDialog({ edit: t, tab: 'relationships' }), store.setConnecting(null)); });
+  createEffect(() => { const t = store.connecting(); if (t) (setDialog({ rels: t }), store.setConnecting(null)); });
   const close = () => setDialog(null);
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -123,7 +124,7 @@ export const App: Component = () => {
               <VisualsPane />
             </Pane>
             <Pane open={store.dataPaneOpen()} label="Data" class="d-data-pane" setOpen={store.setDataPaneOpen}>
-              <DataPane onGetData={() => setDialog({ add: true })} onEditData={(id) => setDialog({ edit: id })} onReplaceData={(id) => setDialog({ replace: id })} onMeasure={(table, name, field) => setDialog({ measure: { table, name, field } })} />
+              <DataPane onGetData={() => setDialog({ add: true })} onEditData={(id) => setDialog({ edit: id })} onRelationships={() => setDialog({ rels: true })} onReplaceData={(id) => setDialog({ replace: id })} onMeasure={(table, name, field) => setDialog({ measure: { table, name, field } })} />
             </Pane>
           </div>
         </Show>
@@ -140,8 +141,11 @@ export const App: Component = () => {
       <Show when={dialog()?.add}>
         <AddDataDialog onClose={close} />
       </Show>
+      <Show when={dialog()?.rels}>
+        {(r) => <RelationshipsDialog start={r() === true ? undefined : (r() as [string, string])} onClose={close} />}
+      </Show>
       <Show when={dialog()?.edit}>
-        {(id) => <EditDataDialog id={id()} tab={dialog()?.tab} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
+        {(id) => <EditDataDialog id={id()} onRelationships={() => setDialog({ rels: true })} onClose={close} onReplace={() => setDialog({ replace: id() })} />}
       </Show>
       <Show when={dialog()?.about}>
         <Modal class="d-small d-about" title="Dashier" subtitle="Your report and data in one editable HTML file." onClose={close} ok="Done" onOk={close}>

@@ -488,7 +488,7 @@ function createDashboardStore() {
   const unconnected = (e: DashElement) =>
     e.sourceId ? [...new Set(fieldRefs(e).flatMap(f => (isMeasureRef(f) ? [] : [refTableOf(e.sourceId, f)])).filter((t): t is string => !!t && !joinPath(e.sourceId!, t)))] : [];
   /** A table whose connections the user asked to edit (from a visual that needs one): the app opens them. */
-  const [connecting, setConnecting] = createSignal<string | null>(null);
+  const [connecting, setConnecting] = createSignal<[string, string] | null>(null);
   /** True for a table's name (and never for a name every object has, like "constructor"). */
   const isTable = (name: string) => Object.hasOwn(doc.sources, name);
   /** The tables' names, in order. */

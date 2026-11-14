@@ -1,4 +1,5 @@
-import { Component, For, Show, createSignal, onCleanup } from 'solid-js';
+import { Component, For, JSX, Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 
 /** Shortcuts as the viewer's keyboard writes them: ⌘S on a Mac, iPhone or iPad, Ctrl+S elsewhere. */
 export const MAC = /Mac|iP(hone|ad|od)/.test(navigator.userAgent);
@@ -102,5 +103,28 @@ export const ContextMenuHost: Component = () => {
         </div>
       )}
     </Show>
+  );
+};
+
+/**
+ * A panel under `anchor`, as a field's menu is: fixed at the app's root (no pane, dialog or scrolling cuts it off),
+ * flipped above the anchor and pulled in from the window's edge where it would run off; a click outside closes it.
+ */
+export const Popover: Component<{ anchor: HTMLElement; onClose: () => void; class?: string; children: JSX.Element }> = (props) => {
+  let el!: HTMLDivElement;
+  const r = props.anchor.getBoundingClientRect(), area = menuArea();
+  const [pos, setPos] = createSignal({ left: r.left, top: r.bottom + 4 });
+  onMount(() => {
+    const m = el.getBoundingClientRect();
+    setPos({ top: r.bottom + 4 + m.height > area.bottom ? Math.max(area.top, r.top - m.height - 4) : r.bottom + 4, left: Math.min(r.left, innerWidth - m.width - 8) });
+    // a click on the anchor itself toggles it
+    dismiss([el, props.anchor], props.onClose);
+  });
+  return (
+    <Portal mount={props.anchor.closest('.ed-root')!}>
+      <div class={`d-field-menu ${props.class ?? ''}`} ref={el} style={{ left: `${pos().left}px`, top: `${pos().top}px`, 'min-width': `${Math.max(r.width, 210)}px`, 'max-height': `${area.bottom - area.top}px` }}>
+        {props.children}
+      </div>
+    </Portal>
   );
 };

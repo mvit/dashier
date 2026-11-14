@@ -47,18 +47,20 @@ filter; editing is for wider windows.
 - **Data pane**: a card per table; its fields are dragged into visuals and onto the Filters pane's wells. *Import data*
   takes a dropped or browsed CSV/JSON file (or pasted text), previews it with each column's type (click a type badge
   to change it; hover a column for its counts), and loads it under the name you give. A table's **⋯** (or right-click,
-  or double-click) → **Edit data…**:
-  - **Data**: the table as a grid. Rename the table (click its name) and its columns (click a column name; visuals,
-    filters and relationships that used it follow, and the stored header is rewritten), and change column types with
-    the type badges (values are re-read as the type you pick; the stored data is untouched). Hover a column for its
-    blanks, distinct values and range. The header says what uses the table (hover for each column's uses: visuals,
-    measures, relationships, filters, sort orders) and which columns nothing uses.
-  - **Relationships**: links between this table's fields and fields of other tables (`relationships` in the
-    document). Everything is editable: both fields, the other table, the cardinality and which way filters flow (one
-    way, or both). Each link shows the share of matching values, and same-named fields are suggested. Connected fields
-    share filters, and a visual built on one table can use the other's fields (dragged in, they appear as
-    `table.field`): as in Power BI, every row of the visual's table stays, and one with no match shows the other
-    table's fields blank.
+  or double-click) → **Edit data…**: the table as a grid. Rename the table (click its name) and its columns (click a
+    column name; visuals, filters and relationships that used it follow, and the stored header is rewritten), and
+    change column types with the type badges (values are re-read as the type you pick; the stored data is untouched).
+    Hover a column for its blanks, distinct values and range. The header says what uses the table (hover for each
+    column's uses: visuals, measures, relationships, filters, sort orders) and which columns nothing uses; **Export
+    CSV** downloads it as stored.
+  - **Relationships…** (the same menu, the button in Edit data, or a visual's **Connect them…** when its tables
+    aren't connected): every link between tables in the report (`relationships` in the document), a row each, saying
+    how many rows sit on each side and the share of matching values. A row opens its settings in a popover, saved as they
+    change: both columns, the
+    cardinality (read from the data when a column changes: the side with unique values is the one side) and which way
+    filters flow (one way, or both). Same-named columns not yet linked are suggested on top (Add or Dismiss). Connected fields share
+    filters, and a visual built on one table can use the other's fields (dragged in, they appear as `table.field`): as
+    in Power BI, every row of the visual's table stays, and one with no match shows the other table's fields blank.
   - **Replace data…** (same menu, or the button in Edit data) loads an updated CSV/JSON into the table. Its name,
     relationships and visuals stay, and columns it already had keep their types. Before replacing, columns the new data
     lacks are flagged with the visuals and relationships that use them; new columns are just listed.

@@ -34,7 +34,7 @@ export const Widget: Component<{ element: DashElement }> = (props) => (
       <div class="d-chart-empty d-unconnected">
         {props.element.sourceId} and {t()} aren't connected
         <Show when={store.editing()}>
-          <button class="d-link-btn" onClick={(e) => (e.stopPropagation(), store.setConnecting(props.element.sourceId!))}>Connect them…</button>
+          <button class="d-link-btn" onClick={(e) => (e.stopPropagation(), store.setConnecting([props.element.sourceId!, t()]))}>Connect them…</button>
         </Show>
       </div>
     )}

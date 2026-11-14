@@ -1,8 +1,8 @@
-import { Component, For, Index, JSX, Show, createSignal, onMount } from 'solid-js';
-import { Portal } from 'solid-js/web';
+import { Component, For, Index, JSX, Show, createSignal } from 'solid-js';
+
 import { DroppedField, dragField, dropProps } from '../runtime/dnd';
 import { AggregationMethod, Compare, ShowAs, Units, ValueFormat } from '../types/model';
-import { dismiss, menuArea } from './ContextMenu';
+import { Popover } from './ContextMenu';
 import { SUMMARY_NAMES } from '../runtime/charts';
 import type { DatePart } from '../runtime/dates';
 import { Rename } from './ui';
@@ -112,29 +112,12 @@ export function compareSections(c: Compare | undefined, onChange: (c?: Compare) 
 /** A drag event handled here: no default action, and no handler further up. */
 const halt = (e: Event) => (e.preventDefault(), e.stopPropagation());
 
-/** The dropdown under a pill. Fixed-positioned, at the app's root: the pane's scrolling and layer never cut it off. */
+/** The dropdown under a pill (a Popover: no pane's scrolling cuts it off). */
 const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () => void; onRename: () => void }> = (props) => {
-  let menu!: HTMLDivElement;
-  const r = props.anchor.getBoundingClientRect();
-  const area = menuArea();
-  const [pos, setPos] = createSignal({ left: r.left, top: r.bottom + 4, width: Math.max(r.width, 210) });
-
-  onMount(() => {
-    // flip above the pill / pull left when it would run off the window
-    const m = menu.getBoundingClientRect();
-    const top = r.bottom + 4 + m.height > area.bottom ? Math.max(area.top, r.top - m.height - 4) : r.bottom + 4;
-    const left = Math.min(r.left, innerWidth - m.width - 8);
-    setPos(p => ({ ...p, top, left }));
-
-    // a click on the pill itself toggles the menu
-    dismiss([menu, props.anchor], () => props.onClose());
-  });
-
   const pick = (fn: () => void) => () => (fn(), props.onClose());
 
   return (
-    <Portal mount={props.anchor.closest('.ed-root')!}>
-      <div class="d-field-menu" ref={menu} style={{ left: `${pos().left}px`, top: `${pos().top}px`, 'min-width': `${pos().width}px`, 'max-height': `${area.bottom - area.top}px` }}>
+    <Popover anchor={props.anchor} onClose={props.onClose}>
         <Show when={props.item.onRename}>
           <button class="d-menu-item" onClick={pick(props.onRename)}>Rename for this visual</button>
         </Show>
@@ -156,8 +139,7 @@ const FieldMenu: Component<{ item: WellItem; anchor: HTMLElement; onClose: () =>
             </>
           )}
         </For>
-      </div>
-    </Portal>
+    </Popover>
   );
 };
 

@@ -8,9 +8,9 @@ import { Dynamic } from 'solid-js/web';
  * classes, drag and drop, a ref) go on the dialog itself, which is a <form> when it has an `onSubmit`.
  */
 export const Modal: Component<
-  { title?: JSX.Element; subtitle?: JSX.Element; onClose?: () => void; ok?: JSX.Element; onOk?: () => void; okOff?: boolean; foot?: JSX.Element } & JSX.HTMLAttributes<HTMLElement>
+  { title?: JSX.Element; subtitle?: JSX.Element; actions?: JSX.Element; onClose?: () => void; ok?: JSX.Element; onOk?: () => void; okOff?: boolean; foot?: JSX.Element } & JSX.HTMLAttributes<HTMLElement>
 > = (props) => {
-  const [own, rest] = splitProps(props, ['title', 'subtitle', 'onClose', 'class', 'children', 'ok', 'onOk', 'okOff', 'foot']);
+  const [own, rest] = splitProps(props, ['title', 'subtitle', 'actions', 'onClose', 'class', 'children', 'ok', 'onOk', 'okOff', 'foot']);
   // Esc closes it, before anything behind it hears the key (as a menu's does), wherever it was opened from
   if (own.onClose) {
     const off = new AbortController();
@@ -28,6 +28,7 @@ export const Modal: Component<
                 <p class="modal-subtitle">{own.subtitle}</p>
               </Show>
             </div>
+            {own.actions}
           </div>
         </Show>
         {own.children}

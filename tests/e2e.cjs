@@ -401,7 +401,6 @@ const openFile = async (p, file) => {
   };
   const editData = async (table) => { await rightClick(table, 'Edit data'); await page.waitForSelector('.modal-dialog'); };
   const closeDialog = async () => { await page.keyboard.press('Escape'); await page.waitForSelector('.modal-dialog', { hidden: true }); };
-  const tab = (n) => page.click(`.d-editdata .d-seg button:nth-child(${n})`);
   const field = (cls, value) => page.evaluateHandle((c, v) => [...document.querySelectorAll(c)].find((i) => i.value === v), cls, value);
   const retype = async (handle, text) => { await handle.click({ count: 3 }); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
   // a column of the Edit Data grid: its type and its blank count from the header's profile
@@ -445,35 +444,34 @@ const openFile = async (p, file) => {
   await sleep(250);
   check('changing it back restores the values', (await rowOf('region')).blanks === '0', (await rowOf('region')).stats);
 
-  // connections = relationships between this table's fields and other tables' fields
-  await tab(2);
-  const rels = () => page.$$eval('.d-rel:not(.d-rel-draft)', (es) => es.map((e) => ({
-    mine: e.querySelector('.d-rel-mine').value,
-    table: e.querySelector('.d-rel-table').value,
-    field: e.querySelector('.d-rel-field').value,
-    meta: e.querySelector('.d-rel-meta').textContent
-  })));
-  const first = (await rels())[0];
-  check('Connections shows field ↔ field links', (await rels()).length === 1 && first.mine === 'region' && first.table === 'region_targets' && first.field === 'area', JSON.stringify(first));
-  check('…with the share of matching values', first.meta.includes('100% match'));
-  check('there are no join kinds to pick (relationships work as in Power BI)', !(await page.$('.d-rel select.d-join-select')));
-  const linkText = () => page.$eval('.d-rel', (e) => `${e.querySelector('.d-rel-card').selectedOptions[0].textContent} · ${e.querySelector('.d-rel-dir').selectedOptions[0].textContent}`);
-  check('…but a cardinality (read from the data) and the way filters flow, as in Power BI', (await linkText()) === 'Many to one · region_targets filters regional_metrics', await linkText());
-  await page.select('.d-rel .d-rel-dir', 'both');
-  check('the cross filter direction can be both ways', (await linkText()).endsWith('Filters both ways'), await linkText());
-  await page.select('.d-rel .d-rel-dir', 'single');
-
-  // connections are editable: the far field
-  await page.select('.d-rel .d-rel-field', 'target_revenue');
-  check('the connected field can be changed (and a type mismatch is flagged)', (await rels())[0].field === 'target_revenue' && (await rels())[0].meta.includes('types differ'), JSON.stringify((await rels())[0]));
-  await page.select('.d-rel .d-rel-field', 'area');
-  check('…and changed back', (await rels())[0].field === 'area');
   // the header says what uses the table: visuals, measures, relationships, filters (each column's on hover)
-  await tab(1);
   const [usedBy, usesTitle] = await page.$eval('.modal-dialog .d-editdata-meta .d-uses', (e) => [e.textContent.trim(), e.title]);
   const regionUses = usesTitle.split('\n').find((l) => l.startsWith('region: ')) ?? '';
   check('the table says what uses it, each column\'s uses on hover: visuals, the relationship, filters', /^used by \d+$/.test(usedBy) && regionUses.includes('Revenue Treemap (Distribution Share)') && regionUses.includes('the relationship with region_targets') && regionUses.includes('a filter'), `${usedBy} | ${regionUses}`);
   check('…and the column headers stay uncluttered', !(await page.$('.modal-dialog thead .d-uses')));
+  await closeDialog();
+
+  // relationships: one list for the whole model, a row each; a row opens its settings in a popover, saved as they change
+  const relsDialog = async () => { await rightClick('regional_metrics', 'Relationships'); await page.waitForSelector('.d-rels-dialog'); };
+  const rels = () => page.$$eval('.d-rels-dialog .d-rel-row', (es) => es.map((e) => ({ name: [...e.querySelectorAll(':scope > .d-rel-end')].map((x) => x.textContent).join(' → '), summary: [...e.querySelectorAll(':scope > .d-tag')].map((x) => x.textContent).join(' · ') })));
+  const relSelect = (i, value) => page.$$eval('.d-rel-pop select', (ss, [i, v]) => ((ss[i].value = v), ss[i].dispatchEvent(new Event('change', { bubbles: true }))), [i, value]);
+  const relShown = (i) => page.$$eval('.d-rel-pop select', (ss, i) => ss[i].selectedOptions[0].textContent, i);
+  await relsDialog();
+  const first = (await rels())[0];
+  check("Relationships lists the model's relationships, a row each", (await rels()).length === 1 && first.name === 'regional_metrics.region → region_targets.area', JSON.stringify(first));
+  check('…saying how many on each side and how many match', first.summary === 'many to one · 100%', first.summary);
+  // a row is a button: the keyboard reaches it, and Enter opens its settings
+  await page.focus('.d-rels-dialog .d-rel-row');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.d-rel-pop');
+  check('a row opens its settings in a popover (Enter on it too): columns, cardinality and filter direction', (await relShown(4)) === 'Many to one' && (await relShown(5)) === 'region_targets filters regional_metrics', `${await relShown(4)} · ${await relShown(5)}`);
+  await relSelect(5, 'true');
+  check('the cross filter direction can be both ways', (await relShown(5)) === 'Both ways');
+  await relSelect(5, 'false');
+  await relSelect(3, 'target_revenue');
+  check('the related column can be changed (and a type mismatch is flagged)', (await rels())[0].name.endsWith('region_targets.target_revenue') && (await rels())[0].summary.includes('types differ'), JSON.stringify((await rels())[0]));
+  await relSelect(3, 'area');
+  check('…and changed back', (await rels())[0].summary === 'many to one · 100%', (await rels())[0].summary);
   await closeDialog();
   await page.click('.d-visual-container[data-type="chart"]');
   check('clicking a visual selects it', !!(await page.$('.d-selection-frame')));
@@ -499,19 +497,26 @@ const openFile = async (p, file) => {
   check('…which says nothing uses it yet', unused === 'unused: No visuals use this table yet', unused);
   await closeDialog();
 
-  // connect two fields from the dialog, then remove the connection
-  await editData('regional_metrics');
-  await tab(2);
-  await page.click('.d-new-rel');
-  await page.select('.d-rel-form .d-rel-mine', 'quarter');
-  await page.select('.d-rel-form .d-rel-table', 'extra');
-  await page.select('.d-rel-form .d-rel-field', 'a');
-  await page.click('.d-rel-form .btn-primary');
-  const added = (await rels())[1];
-  check('Connect adds a relationship', (await rels()).length === 2 && added.table === 'extra', JSON.stringify(added));
-  check('…and flags mismatched types', added.meta.includes('types differ'));
-  await (await page.$$('.d-rel-x'))[1].click();
-  check('the connection can be removed', (await rels()).length === 1);
+  // a new relationship, then its removal
+  await relsDialog();
+  await page.$$eval('.d-rels-dialog button', (bs) => bs.find((x) => x.textContent.includes('New relationship')).click());
+  await page.waitForSelector('.d-rel-pop');
+  for (const [i, v] of [[0, 'regional_metrics'], [1, 'quarter']]) await relSelect(i, v);
+  // a click outside closes the popover but keeps the new relationship (only Cancel discards it)
+  await page.click('.d-rels-dialog .modal-header h3');
+  await page.waitForSelector('.d-rel-pop', { hidden: true });
+  check('a click outside a new relationship keeps it', (await rels())[0].name.startsWith('regional_metrics.quarter'), JSON.stringify((await rels())[0]));
+  await page.click('.d-rels-dialog .d-rel-row');
+  await page.waitForSelector('.d-rel-pop');
+  for (const [i, v] of [[2, 'extra'], [3, 'a']]) await relSelect(i, v);
+  await page.click('.d-rel-pop .btn-primary');
+  const added = (await rels()).find((r) => r.name.includes('extra'));
+  check('New relationship adds one', (await rels()).length === 2 && !!added, JSON.stringify(await rels()));
+  check('…and flags mismatched types', !!added?.summary.includes('types differ'), added?.summary);
+  await page.$$eval('.d-rels-dialog .d-rel-row', (rs) => rs.find((r) => r.textContent.includes('extra')).click());
+  await page.waitForSelector('.d-rel-pop');
+  await page.click('.d-rel-pop .d-danger-link');
+  check('a relationship can be deleted', (await rels()).length === 1);
   await closeDialog();
 
   // rename a table
@@ -600,11 +605,12 @@ const openFile = async (p, file) => {
   const unconnected = await page.$$eval(tiles, (ts) => ts.at(-1).textContent);
   check("a field of an unconnected table is placed, and the visual says the tables aren't connected (as Power BI does)", !(await page.$('.d-drop-note')) && /regional_metrics and scratch aren.t connected/.test(unconnected), unconnected);
   await page.$$eval(tiles, (ts) => ts.at(-1).querySelector('.d-unconnected button').click());
-  await page.waitForSelector('.d-editdata');
-  const relTab = await page.$eval('.d-editdata .d-dialog-seg button.on', (b) => b.textContent).catch(() => '');
-  check("…and its Connect button opens the table's relationships", relTab.startsWith('Relationships'), relTab);
+  await page.waitForSelector('.d-rels-dialog');
+  await page.waitForSelector('.d-rel-pop');
+  const draftTables = await page.$$eval('.d-rel-pop select', (ss) => [ss[0].value, ss[2].value].join());
+  check('…and its Connect button opens a new relationship between its two tables', draftTables === 'regional_metrics,scratch', draftTables);
   await page.keyboard.press('Escape');
-  await page.waitForSelector('.d-editdata', { hidden: true });
+  await page.waitForSelector('.d-rels-dialog', { hidden: true });
   for (let i = 0; i < 2; i++) await page.click('.d-wells-container .d-pill .d-pill-x');
   check('removing the fields empties the slots again', (await slotsEmpty()) === 3);
   await drag('scratch', 'a', 0);
